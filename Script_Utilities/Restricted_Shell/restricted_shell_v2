@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# Bloquear señales relevantes
+trap '' INT QUIT TSTP
+
+# Funciones
+function validate_input() {
+    local input="$1"
+    local pattern="^[a-zA-Z0-9._-]+$"
+    if [[ ! $input =~ $pattern ]]; then
+        echo "Caracteres no válidos en la entrada"
+        return 1
+    fi
+    return 0
+}
+
+function log_action() {
+    local ip="$1"
+    local cmd="$2"
+    echo "[ $(date +"%d/%m/%y %r")] Host: $ip  --  $cmd" >> /var/log/restricted_shell.log
+}
+
+# Variables
+IP=$(echo $SSH_CONNECTION | awk '{print $1, $2}')
+allowed_commands=("ping" "tracepath" "plink" "ssh" "exit")
+echo "Comandos Permitidos: ${allowed_commands[*]}"
+
+while true; do
+    read -e -p "Restricted: $ " -a cmd_parts
+    while [[ -z ${cmd_parts[0]} ]]; do
+        read -e -p "Restricted: $ " -a cmd_parts
+    done
+
+    first_word="${cmd_parts[0]}"
+    cmd="${cmd_parts[*]}"
+
+    if ! validate_input "$first_word"; then
+        continue
+    fi
+
+    log_action "$IP" "$cmd"
+
+    if [[ " ${allowed_commands[*]} " =~ " ${first_word} " ]]; then
+        if [[ "${first_word}" == "exit" ]]; then
+            exit 0
+        else
+            # Limitar la cantidad de argumentos
+            if [[ ${#cmd_parts[@]} -gt 3 ]]; then
+                echo "Demasiados argumentos para el comando \"$first_word\". Se permiten hasta 2 argumentos."
+                continue
+            fi
+
+            # Ejecutar el comando de manera segura utilizando un subproceso, un array y controlando el tiempo de ejecución
+            timeout 10s command "${cmd_parts[@]}"
+        fi
+    else
+        echo "Comando \"${cmd}\" no permitido. Comandos Permitidos: ${allowed_commands[*]}"
+    fi
+done

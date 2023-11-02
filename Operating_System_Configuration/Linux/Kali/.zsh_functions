@@ -1,0 +1,20 @@
+function ssh_tunnel {        
+ssh -N -f -L $2:$1:22 -i /home/kali/.ssh/access.key root@192.168.252.21
+ssh -p $2 root@localhost
+}
+
+function ssh_session {
+        if [[ $1 == "kill" ]];then pkill ssh;fi
+        ps aux | grep ssh | awk '{print $15}'| sed '/^$/d'
+}
+
+alias hosts='cat /etc/hosts'
+alias access='cat .ssh/access.key.pub'
+
+#function sshconfig {
+#       cat .ssh/config | awk '/Host/ {print $2}' | awk '{if (NR % 2 == 0) printf "\033[31m%s\033[0m\n", $1; else printf "\033[32m%s\033[0m ", $1;}' | sort | column -t
+#}
+
+#function sshconfig_edit {
+#       ~/.ssh/sshconfig_editor.sh
+#}

@@ -1,0 +1,387 @@
+# Example `sshd_config` file with all of the listed parameters
+
+# AcceptEnv
+# This option allows the client to send environment variables to the server
+AcceptEnv LANG LC_*
+
+# AddressFamily
+# This option specifies which address family should be used by default
+# Valid values are "any", "inet" (IPv4 only), or "inet6" (IPv6 only)
+AddressFamily any
+
+# AllowAgentForwarding
+# This option allows authenticated users to forward their SSH agent connections
+AllowAgentForwarding yes
+
+# AllowGroups
+# This option specifies which groups are allowed to log in
+AllowGroups ssh-users
+
+# AllowStreamLocalForwarding
+# This option allows the use of stream local (UNIX domain socket) forwarding
+AllowStreamLocalForwarding yes
+
+# AllowTcpForwarding
+# This option allows the use of TCP forwarding
+AllowTcpForwarding yes
+
+# AllowUsers
+# This option specifies which users are allowed to log in
+AllowUsers user1 user2
+
+# AuthenticationMethods
+# This option specifies the authentication methods that should be allowed
+AuthenticationMethods publickey,keyboard-interactive
+
+# AuthorizedKeysCommand
+# This option specifies a script to run to look up the user's public keys
+AuthorizedKeysCommand /usr/local/sbin/lookup-ssh-keys
+
+# AuthorizedKeysCommandUser
+# This option specifies the user that the AuthorizedKeysCommand should be run as
+AuthorizedKeysCommandUser nobody
+
+# AuthorizedKeysFile
+# This option specifies the file that contains the user's public keys
+AuthorizedKeysFile .ssh/authorized_keys
+
+# AuthorizedPrincipalsCommand
+# This option specifies a script to run to look up the user's authorized principals
+AuthorizedPrincipalsCommand /usr/local/sbin/lookup-authorized-principals
+
+# AuthorizedPrincipalsCommandUser
+# This option specifies the user that the AuthorizedPrincipalsCommand should be run as
+AuthorizedPrincipalsCommandUser nobody
+
+# AuthorizedPrincipalsFile
+# This option specifies the file that contains the user's authorized principals
+AuthorizedPrincipalsFile .ssh/authorized_principals
+
+# Banner
+# This option specifies the file that contains the login banner message
+Banner /etc/issue.net
+
+# CASignatureAlgorithms
+# This option specifies the signature algorithms that are allowed for certificate authorities (CAs)
+CASignatureAlgorithms rsa-sha2-256,rsa-sha2-512
+
+# ChrootDirectory
+# This option specifies the directory to chroot to after the user has authenticated
+ChrootDirectory /var/empty/sshd
+
+# Ciphers
+# This option specifies the ciphers that are allowed for encrypting the session
+Ciphers aes256-ctr,aes192-ctr,aes128-ctr
+
+# ClientAliveCountMax
+# This option specifies the number of client alive messages (without any response from the server)
+# that the server should send before disconnecting the client
+ClientAliveCountMax 3
+
+# ClientAliveInterval
+# This option specifies the interval (in seconds) at which the server should send client alive messages
+ClientAliveInterval 60
+
+# Compression
+# This option enables compression for the connection
+Compression yes
+
+# DenyGroups
+# This option specifies which groups are not allowed to log in
+DenyGroups ssh-blacklist
+
+# DenyUsers
+# This option specifies which users are not allowed to log in
+DenyUsers user3 user4
+
+# DisableForwarding
+# This option disables all types of forwarding (agent, stream local, and TCP)
+DisableForwarding no
+
+# ExposeAuthInfo
+# This option allows the server to expose information about the user's authentication to the client
+ExposeAuthInfo yes
+
+# FingerprintHash
+# This option specifies the hash algorithm that should be used for host key fingerprints
+FingerprintHash sha256
+
+# ForceCommand
+# This option forces the execution of a specific command after authentication
+ForceCommand /usr/local/sbin/run-restricted-command
+
+# GatewayPorts
+# This option allows remote hosts to bind to forwarded ports
+GatewayPorts no
+
+# GSSAPIAuthentication
+# This option enables GSSAPI authentication
+GSSAPIAuthentication yes
+
+# GSSAPICleanupCredentials
+# This option controls whether GSSAPI credentials should be deleted after authentication
+GSSAPICleanupCredentials yes
+
+# GSSAPIStrictAcceptorCheck
+# This option controls whether the server should strictly check the acceptor name in the GSSAPI negotiation
+GSSAPIStrictAcceptorCheck yes
+
+# HostbasedAcceptedAlgorithms
+# This option specifies the hostbased algorithms that are allowed for authentication
+HostbasedAcceptedAlgorithms ssh-rsa,ssh-ed25519
+
+# HostbasedAuthentication
+# This option enables hostbased authentication
+HostbasedAuthentication yes
+
+# HostbasedUsesNameFromPacketOnly
+# This option controls whether the server should use only the name from the packet for hostbased authentication
+HostbasedUsesNameFromPacketOnly yes
+
+# HostCertificate
+# This option specifies the host certificate file that should be used for hostbased authentication
+HostCertificate /etc/ssh/ssh_host_rsa_key-cert.pub
+
+# HostKey
+# This option specifies the host key files that should be used for host key verification
+HostKey /etc/ssh/ssh_host_rsa_key
+
+# HostKeyAgent
+# This option specifies the ssh-agent socket that should be used to retrieve the host key
+HostKeyAgent /run/ssh-agent.sock
+
+# HostKeyAlgorithms
+# This option specifies the host key algorithms that are allowed for host key verification
+HostKeyAlgorithms ssh-rsa,ssh-ed25519
+
+# IgnoreRhosts
+# This option controls whether .rhosts and .shosts files should be ignored
+IgnoreRhosts yes
+
+# IgnoreUserKnownHosts
+# This option controls whether the server should ignore the user's known_hosts file
+IgnoreUserKnownHosts yes
+
+# Include
+# This option allows the inclusion of other configuration files within the current file
+Include /etc/ssh/sshd_config.d/*.conf
+
+# IPQoS
+# This option specifies the Quality of Service (QoS) setting for the connection
+IPQoS lowdelay
+
+# KbdInteractiveAuthentication
+# This option enables keyboard-interactive authentication
+KbdInteractiveAuthentication yes
+
+# KerberosAuthentication
+# This option enables Kerberos authentication
+KerberosAuthentication yes
+
+# KerberosGetAFSToken
+# This option controls whether the server should request an AFS token after successful Kerberos authentication
+KerberosGetAFSToken no
+
+# KerberosOrLocalPasswd
+# This option controls whether the server should allow the use of a local password if Kerberos authentication fails
+KerberosOrLocalPasswd yes
+
+# KerberosTicketCleanup
+# This option controls whether the server should delete the user's Kerberos ticket cache after authentication
+KerberosTicketCleanup yes
+
+# KexAlgorithms
+# This option specifies the key exchange algorithms that are allowed
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,diffie-hellman-group-exchange-sha256
+
+# ListenAddress
+# This option specifies the IP address(es) and port number that the server should listen on
+ListenAddress 0.0.0.0:22
+
+# LoginGraceTime
+# This option specifies the time (in seconds) that the server should allow for authentication
+LoginGraceTime 120
+
+# LogLevel
+# This option specifies the verbosity of the server's logging
+LogLevel INFO
+
+# LogVerbose
+# This option controls whether the server should log additional information about the connection and authentication
+LogVerbose no
+
+# Match
+# This option allows the specification of conditions that control the application of the following directives
+Match Group ssh-users
+
+# PermitRootLogin
+# This option controls whether root is allowed to log in
+PermitRootLogin no
+
+# MaxAuthTries
+# This option specifies the maximum number of authentication attempts that should be allowed per connection
+MaxAuthTries 4
+
+# MaxSessions
+# This option specifies the maximum number of sessions that should be allowed per connection
+MaxSessions 3
+
+# MaxStartups
+# This option specifies the maximum number of unauthenticated connections that should be allowed
+MaxStartups 10:30:60
+
+# ModuliFile
+# This option specifies the file that contains the Diffie-Hellman groups used for key exchange
+ModuliFile /etc/ssh/moduli
+
+# PasswordAuthentication
+# This option enables password authentication
+PasswordAuthentication yes
+
+# PermitEmptyPasswords
+# This option controls whether the server should allow empty passwords
+PermitEmptyPasswords no
+
+# PermitListen
+# This option controls which IP addresses and port numbers the server is allowed to bind to
+PermitListen 0.0.0.0:22
+
+# PermitOpen
+# This option controls which destinations the server is allowed to forward to
+PermitOpen localhost:22
+
+# PermitRootLogin
+# This option controls whether root is allowed to log in
+PermitRootLogin no
+
+# PermitTTY
+# This option controls whether the server should allocate a TTY for the session
+PermitTTY yes
+
+# PermitTunnel
+# This option controls whether the server should allow tunneling
+PermitTunnel no
+
+# PermitUserEnvironment
+# This option controls whether the server should allow the client to send environment variables
+PermitUserEnvironment yes
+
+# PermitUserRC
+# This option controls whether the server should allow the execution of ~/.ssh/rc
+PermitUserRC yes
+
+# PerSourceMaxStartups
+# This option specifies the maximum number of unauthenticated connections that should be allowed per source IP address
+PerSourceMaxStartups 10
+
+# PerSourceNetBlockSize
+# This option specifies the netblock size that should be used for the PerSourceMaxStartups directive
+PerSourceNetBlockSize 2
+
+# PidFile
+# This option specifies the file that should contain the process ID of the server
+PidFile /var/run/sshd.pid
+
+# Port
+# This option specifies the port number that the server should listen on
+Port 22
+
+# PrintLastLog
+# This option controls whether the server should print the date and time of the last user login
+PrintLastLog yes
+
+# PrintMotd
+# This option controls whether the server should print the message of the day (MOTD)
+PrintMotd yes
+
+# PubkeyAcceptedAlgorithms
+# This option specifies the public key algorithms that are allowed for authentication
+PubkeyAcceptedAlgorithms ssh-rsa,ssh-ed25519
+
+# PubkeyAuthOptions
+# This option specifies options for public key authentication
+PubkeyAuthOptions no-port-forwarding,no-agent-forwarding,no-X11-forwarding
+
+# PubkeyAuthentication
+# This option enables public key authentication
+PubkeyAuthentication yes
+
+# RekeyLimit
+# This option specifies the maximum amount of data that can be transmitted before the session keys are renegotiated
+RekeyLimit 1G
+
+# RequiredRSASize
+# This option specifies the minimum size (in bits) for RSA keys that are used for authentication
+RequiredRSASize 2048
+
+# RevokedKeys
+# This option specifies the file that contains revoked keys
+RevokedKeys /etc/ssh/revoked_keys
+
+# RDomain
+# This option specifies the local domain that should be used for Kerberos authentication
+RDomain example.com
+
+# SecurityKeyProvider
+# This option specifies the security key provider that should be used for public key authentication
+SecurityKeyProvider ssh-sk-provider
+
+# SetEnv
+# This option allows the server to set environment variables for the session
+SetEnv LANG en_US.UTF-8
+
+# StreamLocalBindMask
+# This option specifies the permissions that should be applied to stream local (UNIX domain socket) bind mounts
+StreamLocalBindMask 0177
+
+# StreamLocalBindUnlink
+# This option controls whether the server should unlink the stream local (UNIX domain socket) file after binding
+StreamLocalBindUnlink yes
+
+# StrictModes
+# This option controls whether the server should check file modes and ownership of the user's files
+StrictModes yes
+
+# Subsystem
+# This option specifies the name of a subsystem (e.g. sftp) that should be enabled
+Subsystem sftp /usr/lib/ssh/sftp-server
+
+# SyslogFacility
+# This option specifies the syslog facility that should be used for logging
+SyslogFacility AUTH
+
+# TCPKeepAlive
+# This option controls whether the server should send TCP keepalive messages
+TCPKeepAlive yes
+
+# TrustedUserCAKeys
+# This option specifies the file that contains trusted user CA keys
+TrustedUserCAKeys /etc/ssh/authorized_user_ca_keys
+
+# UseDNS
+# This option controls whether the server should use DNS to look up the hostname of the client
+UseDNS no
+
+# UsePAM
+# This option enables Pluggable Authentication Modules (PAM)
+UsePAM yes
+
+# VersionAddendum
+# This option specifies a string that should be appended to the SSH version string
+VersionAddendum MySSHServer
+
+# X11DisplayOffset
+# This option specifies the display number offset that should be used for X11 forwarding
+X11DisplayOffset 10
+
+# X11Forwarding
+# This option enables X11 forwarding
+X11Forwarding yes
+
+# X11UseLocalhost
+# This option controls whether the server should listen for X11 connections on the loopback address only
+X11UseLocalhost yes
+
+# XAuthLocation
+# This option specifies the path to the xauth program that should be used for X11 forwarding
+XAuthLocation /usr/bin/xauth

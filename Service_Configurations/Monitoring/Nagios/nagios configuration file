@@ -1,0 +1,374 @@
+# Log File
+log_file=nagios.log
+
+# Object Configuration File
+cfg_file=objects.cfg
+
+# Object Configuration Directory
+cfg_dir=conf.d
+
+# Object Cache File
+obj_cache_file=objects.cache
+
+# Precached Object File
+precached_object_file=objects.precache
+
+# Resource File
+resource_file=resource.cfg
+
+# Temp File
+temp_file=nagios.tmp
+
+# Temp Path
+temp_path=/tmp
+
+# Status File
+status_file=status.dat
+
+# Status File Update Interval
+status_update_interval=10
+
+# Nagios User
+nagios_user=nagios
+
+# Nagios Group
+nagios_group=nagios
+
+# Notifications Option
+enable_notifications=1
+
+# Service Check Execution Option
+execute_service_checks=1
+
+# Passive Service Check Acceptance Option
+accept_passive_service_checks=1
+
+# Host Check Execution Option
+execute_host_checks=1
+
+# Passive Host Check Acceptance Option
+accept_passive_host_checks=1
+
+# Event Handler Option
+enable_event_handlers=1
+
+# Log Rotation Method
+log_rotation_method=d
+
+# Log Archive Path
+log_archive_path=logs
+
+# External Command Check Option
+check_external_commands=1
+
+# External Command Check Interval
+command_check_interval=-1
+
+# External Command File
+command_file=var/rw/nagios.cmd
+
+# External Command Buffer Slots
+command_buffer_slots=4096
+
+# Update Checks
+enable_predictive_host_dependency_checks=1
+enable_predictive_service_dependency_checks=1
+
+# Bare Update Checks
+bare_update_checks=0
+
+# Lock File
+lock_file=var/nagios.lock
+
+# State Retention Option
+retain_state_information=1
+
+# State Retention File
+state_retention_file=retention.dat
+
+# Automatic State Retention Update Interval
+retention_update_interval=60
+
+# Use Retained Program State Option
+use_retained_program_state=1
+
+# Use Retained Scheduling Info Option
+use_retained_scheduling_info=1
+
+# Retained Host and Service Attribute Masks
+retained_host_attribute_mask=0
+retained_service_attribute_mask=0
+
+# Retained Process Attribute Masks
+retained_process_host_attribute_mask=0
+retained_process_service_attribute_mask=0
+retained_process_command_attribute_mask=0
+
+# Syslog Logging Option
+use_syslog=0
+
+# Notification Logging Option
+log_notifications=1
+
+# Service Check Retry Logging Option
+log_service_retries=1
+
+# Host Check Retry Logging Option
+log_host_retries=1
+
+# Event Handler Logging Option
+log_event_handlers=1
+
+# Initial States Logging Option
+log_initial_states=0
+
+# External Command Logging Option
+log_external_commands=
+# Passive Check Logging Option
+log_passive_checks=1
+
+# Global Host Event Handler Option
+global_host_event_handler=
+
+# Global Service Event Handler Option
+global_service_event_handler=
+
+# Inter-Check Sleep Time
+sleep_time=0.25
+
+# Service Inter-Check Delay Method
+service_inter_check_delay_method=s
+
+# Maximum Service Check Spread
+max_service_check_spread=30
+
+# Service Interleave Factor
+service_interleave_factor=s
+
+# Maximum Concurrent Service Checks
+max_concurrent_checks=0
+
+# Check Result Reaper Frequency
+check_result_reaper_frequency=10
+
+# Maximum Check Result Reaper Time
+max_check_result_reaper_time=30
+
+# Check Result Path
+check_result_path=var/spool/checkresults
+
+# Max Check Result File Age
+max_check_result_file_age=3600
+
+# Host Inter-Check Delay Method
+host_inter_check_delay_method=s
+
+# Maximum Host Check Spread
+max_host_check_spread=30
+
+# Timing Interval Length
+interval_length=60
+
+# Auto-Rescheduling Option
+auto_reschedule_checks=1
+
+# Auto-Rescheduling Interval
+auto_rescheduling_interval=30
+
+# Auto-Rescheduling Window
+auto_rescheduling_window=180
+
+# Aggressive Host Checking Option
+aggressive_host_checking=0
+
+# Translate Passive Host Checks Option
+translate_passive_host_checks=1
+
+# Passive Host Checks Are SOFT Option
+passive_host_checks_are_soft=1
+
+# Predictive Host Dependency Checks Option
+enable_predictive_host_dependency_checks=1
+
+# Predictive Service Dependency Checks Option
+enable_predictive_service_dependency_checks=1
+
+# Cached Host Check Horizon
+cached_host_check_horizon=15
+
+# Cached Service Check Horizon
+cached_service_check_horizon=15
+
+# Large Installation Tweaks Option
+use_large_installation_tweaks=0
+
+# Child Process Memory Option
+child_processes_fork_twice=0
+
+# Environment Macros Option
+enable_environment_macros=1
+
+# Flap Detection Option
+enable_flap_detection=1
+
+# Low Service Flap Threshold
+low_service_flap_threshold=5.0
+
+# High Service Flap Threshold
+high_service_flap_threshold=20.0
+
+# Low Host Flap Threshold
+low_host_flap_threshold=5.0
+
+# High Host Flap Threshold
+high_host_flap_threshold=20.0
+
+# Soft State Dependencies Option
+soft_state_dependencies=0
+
+# Service Check Timeout
+service_check_timeout=60
+
+# Service Check Timeout State
+service_check_timeout_state=c
+
+# Host Check Timeout
+host_check_timeout=30
+
+# Event Handler Timeout
+event_handler_timeout=30
+
+# Notification Timeout
+notification_timeout=30
+
+# Obsessive Compulsive Service Processor Timeout
+# Obsessive Compulsive Service Processor Timeout
+ocsp_timeout=15
+
+# Obsessive Compulsive Host Processor Timeout
+ochp_timeout=15
+
+# Performance Data Processor Command Timeout
+perfdata_timeout=5
+
+# Obsess Over Services Option
+obsess_over_services=1
+
+# Obsessive Compulsive Service Processor Command
+ocsp_command=
+
+# Obsess Over Hosts Option
+obsess_over_hosts=1
+
+# Obsessive Compulsive Host Processor Command
+ochp_command=
+
+# Performance Data Processing Option
+process_performance_data=1
+
+# Host Performance Data Processing Command
+host_perfdata_command=process-host-perfdata
+
+# Service Performance Data Processing Command
+service_perfdata_command=process-service-perfdata
+
+# Host Performance Data File
+host_perfdata_file=var/service-perfdata
+
+# Service Performance Data File
+service_perfdata_file=var/service-perfdata
+
+# Host Performance Data File Template
+host_perfdata_file_template=DATATYPE::HOSTPERFDATA\tTIMET::$TIMET$\tHOSTNAME::$HOSTNAME$\tHOSTPERFDATA::$HOSTPERFDATA$\tHOSTCHECKCOMMAND::$HOSTCHECKCOMMAND$\tHOSTSTATE::$HOSTSTATE$\tHOSTSTATETYPE::$HOSTSTATETYPE$\tHOSTATTEMPT::$HOSTATTEMPT$
+
+# Service Performance Data File Template
+service_perfdata_file_template=DATATYPE::SERVICEPERFDATA\tTIMET::$TIMET$\tHOSTNAME::$HOSTNAME$\tSERVICEDESC::$SERVICEDESC$\tSERVICEPERFDATA::$SERVICEPERFDATA$\tSERVICECHECKCOMMAND::$SERVICECHECKCOMMAND$\tHOSTSTATE::$HOSTSTATE$\tHOSTSTATETYPE::$HOSTSTATETYPE$\tSERVICESTATE::$SERVICESTATE$\tSERVICESTATETYPE::$SERVICESTATETYPE$\tSERVICEATTEMPT::$SERVICEATTEMPT$
+
+# Host Performance Data File Mode
+host_perfdata_file_mode=a
+
+# Service Performance Data File Mode
+service_perfdata_file_mode=a
+
+# Host Performance Data File Processing Interval
+host_perfdata_file_processing_interval=15
+
+# Service Performance Data File Processing Interval
+service_perfdata_file_processing_interval=15
+
+# Host Performance Data File Processing Command
+host_perfdata_file_processing_command=process-host-perfdata-file
+
+# Service Performance Data File Processing Command
+service_perfdata_file_processing_command=process-service-perfdata-file
+
+# Orphaned Service Check Option
+check_orphaned_services=1
+
+# Orphaned Host Check Option
+check_orphaned_hosts=1
+
+# Service Freshness Checking Option
+check_service_freshness=
+# Service Freshness Check Interval
+service_freshness_check_interval=60
+
+# Host Freshness Checking Option
+check_host_freshness=1
+
+# Host Freshness Check Interval
+host_freshness_check_interval=60
+
+# Additional Freshness Threshold Latency Option
+additional_freshness_latency=15
+
+# Embedded Perl Interpreter Option
+use_embedded_perl_implicitly=1
+
+# Embedded Perl Implicit Use Option
+use_embedded_perl=1
+
+# Date Format
+date_format=us
+
+# Timezone Option
+use_timezone=utc
+
+# Illegal Object Name Characters
+illegal_object_name_chars=`~!$%^&*|'"<>?,()=
+
+# Illegal Macro Output Characters
+illegal_macro_output_chars=`~$&|'"<>
+
+# Regular Expression Matching Option
+use_regexp_matching=0
+
+# True Regular Expression Matching Option
+use_true_regexp_matching=0
+
+# Administrator Email Address
+admin_email=nagiosadmin@localhost
+
+# Administrator Pager
+admin_pager=pageradmin@localhost
+
+# Event Broker Options
+event_broker_options=-1
+
+# Event Broker Modules
+event_broker_module=
+
+# Debug File
+debug_file=var/nagios.debug
+
+# Debug Level
+debug_level=-1
+
+# Debug Verbosity
+debug_verbosity=1
+
+# Maximum Debug File Size
+max_debug_file_size=1000000
+
+# Allow Empty Hostgroup Assignment
+allow_empty_hostgroup_assignment=0

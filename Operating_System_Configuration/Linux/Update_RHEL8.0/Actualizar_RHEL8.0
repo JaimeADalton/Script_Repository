@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Variables de registro
+username="user"
+password="password"
+
+# Crear un archivo de registro
+log_file="/var/log/script.log"
+echo "Iniciando script: $(date)" | tee -a "$log_file"
+
+# Registrar el sistema
+echo "Registrando el sistema: $(date)" | tee -a "$log_file"
+subscription-manager register --username="$username" --password="$password" --force --release=8.6 2>&1 | tee -a "$log_file" || exit 1
+
+# Limpiar caché y actualizar
+echo "Limpiando caché y actualizando: $(date)" | tee -a "$log_file"
+yum clean all 2>&1 | tee -a "$log_file"
+yum update -y 2>&1 | tee -a "$log_file"
+
+# Reiniciar el sistema
+echo "Reiniciando el sistema: $(date)" | tee -a "$log_file"
+reboot 2>&1 | tee -a "$log_file"
