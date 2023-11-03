@@ -5,7 +5,7 @@
 #server1,Server 1,192.168.1.1,linux-servers
 
 # Path to the Nagios configuration file.
-NAGIOS_CONFIG="~/your_config_file.cfg"
+NAGIOS_CONFIG="your_config_file.cfg"
 
 declare -A hostgroup_members
 
@@ -35,7 +35,7 @@ add_new_member_to_hostgroup() {
 }
 
 # Read the CSV file and populate the hostgroup_members associative array
-while IFS=, read -r host_name alias address hostgroup
+while IFS=";" read -r host_name alias address hostgroup
 do
     # Skip the header line
     if [ "$host_name" != "host_name" ]; then
