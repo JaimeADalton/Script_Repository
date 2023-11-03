@@ -1,9 +1,5 @@
 #!/bin/bash
 
-#El archivo csv se debe de llamar hosts.csv y tener la siguiente esctructura:
-#host_name,alias,address,hostgroup
-#server1,Server 1,192.168.1.1,linux-servers
-
 # Path to the Nagios configuration file.
 NAGIOS_CONFIG="your_config_file.cfg"
 
@@ -34,8 +30,30 @@ add_new_member_to_hostgroup() {
     rm -f "$config_file.bak"
 }
 
+# Detect CSV separator function
+detect_csv_separator() {
+    local file="$1"
+    # Assume the separator is a comma, semicolon, or tab
+    local separators=',;        '
+    local first_line=$(head -n 1 "$file")
+    for sep in $(echo $separators | fold -w1); do
+        if [[ "$first_line" == *"$sep"* ]]; then
+            echo "$sep"
+            return
+        fi
+    done
+}
+
+# Detect the separator
+CSV_SEPARATOR=$(detect_csv_separator "hosts.csv")
+
+if [ -z "$CSV_SEPARATOR" ]; then
+    echo "Cannot detect CSV separator."
+    exit 1
+fi
+
 # Read the CSV file and populate the hostgroup_members associative array
-while IFS=";" read -r host_name alias address hostgroup
+while IFS="$CSV_SEPARATOR" read -r host_name alias address hostgroup
 do
     # Skip the header line
     if [ "$host_name" != "host_name" ]; then
