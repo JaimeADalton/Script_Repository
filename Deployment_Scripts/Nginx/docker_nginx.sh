@@ -15,9 +15,9 @@ mkdir -p "$NGINX_SSL_DIR"
 docker run --name tmp-nginx -d nginx
 
 # Copiar la configuración y el contenido predeterminado de NGINX
-docker cp tmp-nginx:/etc/nginx/ "$NGINX_ETC_DIR"
-docker cp tmp-nginx:/var/www/ "$NGINX_WWW_DIR"
-docker cp tmp-nginx:/etc/ssl/ "$NGINX_SSL_DIR"
+docker cp tmp-nginx:/etc/nginx/. "$NGINX_ETC_DIR"
+docker cp tmp-nginx:/var/www/. "$NGINX_WWW_DIR"
+docker cp tmp-nginx:/etc/ssl/. "$NGINX_SSL_DIR"
 
 # Detener y eliminar el contenedor temporal de NGINX
 docker stop tmp-nginx
