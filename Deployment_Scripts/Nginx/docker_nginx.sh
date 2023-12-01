@@ -11,12 +11,25 @@ mkdir -p "$NGINX_ETC_DIR"
 mkdir -p "$NGINX_WWW_DIR"
 mkdir -p "$NGINX_SSL_DIR"
 
+# Ejecutar un contenedor temporal de NGINX
+docker run --name tmp-nginx -d nginx
+
+# Copiar la configuración y el contenido predeterminado de NGINX
+docker cp tmp-nginx:/etc/nginx/ "$NGINX_ETC_DIR"
+docker cp tmp-nginx:/var/www/ "$NGINX_WWW_DIR"
+docker cp tmp-nginx:/etc/ssl/ "$NGINX_SSL_DIR"
+
+# Detener y eliminar el contenedor temporal de NGINX
+docker stop tmp-nginx
+docker rm tmp-nginx
+
 # Generar el archivo docker-compose.yml
 cat > "$WORKDIR/docker-compose.yml" <<EOF
 version: '3'
 
 services:
   nginx:
+    container_name: nginx
     image: nginx:latest
     ports:
       - "80:80"
@@ -33,21 +46,7 @@ networks:
     driver: bridge
 EOF
 
-# Iniciar el servicio NGINX
-docker compose -f "$WORKDIR/docker-compose.yml" up -d nginx
-
-# Esperar para asegurarse de que el contenedor esté completamente iniciado
-sleep 10
-
-# Obtener el ID del contenedor de NGINX
-NGINX_CONTAINER_ID=$(docker-compose -f "$WORKDIR/docker-compose.yml" ps -q nginx)
-
-# Copiar la configuración y el contenido predeterminado de NGINX
-docker cp "${NGINX_CONTAINER_ID}:/etc/nginx/" "$NGINX_ETC_DIR"
-docker cp "${NGINX_CONTAINER_ID}:/var/www/" "$NGINX_WWW_DIR"
-docker cp "${NGINX_CONTAINER_ID}:/etc/ssl/" "$NGINX_SSL_DIR"
-
-# Detener el servicio NGINX
-docker compose -f "$WORKDIR/docker-compose.yml" down
+# Iniciar el servicio NGINX con Docker Compose
+docker-compose -f "$WORKDIR/docker-compose.yml" up -d
 
 echo "Configuración de NGINX completada. Edita los archivos en '$NGINX_ETC_DIR', '$NGINX_WWW_DIR' y '$NGINX_SSL_DIR' según sea necesario."
