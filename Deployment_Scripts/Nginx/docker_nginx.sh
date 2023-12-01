@@ -34,7 +34,7 @@ networks:
 EOF
 
 # Iniciar el servicio NGINX
-docker-compose -f "$WORKDIR/docker-compose.yml" up -d nginx
+docker compose -f "$WORKDIR/docker-compose.yml" up -d nginx
 
 # Esperar para asegurarse de que el contenedor esté completamente iniciado
 sleep 10
@@ -48,6 +48,6 @@ docker cp "${NGINX_CONTAINER_ID}:/var/www/" "$NGINX_WWW_DIR"
 docker cp "${NGINX_CONTAINER_ID}:/etc/ssl/" "$NGINX_SSL_DIR"
 
 # Detener el servicio NGINX
-docker-compose -f "$WORKDIR/docker-compose.yml" down
+docker compose -f "$WORKDIR/docker-compose.yml" down
 
 echo "Configuración de NGINX completada. Edita los archivos en '$NGINX_ETC_DIR', '$NGINX_WWW_DIR' y '$NGINX_SSL_DIR' según sea necesario."
