@@ -4,9 +4,11 @@
 WORKDIR=$(dirname "$(realpath "$0")")
 
 # Crear directorios para la configuración y el contenido de NGINX
+NGINX_SHR_DIR="$WORKDIR/nginx/share"
 NGINX_ETC_DIR="$WORKDIR/nginx/etc"
 NGINX_WWW_DIR="$WORKDIR/nginx/www"
 NGINX_SSL_DIR="$WORKDIR/nginx/ssl"
+mkdir -p "$NGINX_SHR_DIR"
 mkdir -p "$NGINX_ETC_DIR"
 mkdir -p "$NGINX_WWW_DIR"
 mkdir -p "$NGINX_SSL_DIR"
@@ -15,6 +17,7 @@ mkdir -p "$NGINX_SSL_DIR"
 docker run --name tmp-nginx -d nginx
 
 # Copiar la configuración y el contenido predeterminado de NGINX
+docker cp tmp-nginx:/usr/share/nginx/. "$NGINX_SHR_DIR"
 docker cp tmp-nginx:/etc/nginx/. "$NGINX_ETC_DIR"
 docker cp tmp-nginx:/var/www/. "$NGINX_WWW_DIR"
 docker cp tmp-nginx:/etc/ssl/. "$NGINX_SSL_DIR"
@@ -35,6 +38,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
+      - ./nginx/share:/usr/share/nginx
       - ./nginx/etc:/etc/nginx
       - ./nginx/www:/var/www
       - ./nginx/ssl:/etc/ssl
@@ -47,6 +51,6 @@ networks:
 EOF
 
 # Iniciar el servicio NGINX con Docker Compose
-docker-compose -f "$WORKDIR/docker-compose.yml" up -d
+docker compose -f "$WORKDIR/docker-compose.yml" up -d
 
 echo "Configuración de NGINX completada. Edita los archivos en '$NGINX_ETC_DIR', '$NGINX_WWW_DIR' y '$NGINX_SSL_DIR' según sea necesario."
