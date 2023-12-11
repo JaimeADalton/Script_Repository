@@ -4,20 +4,20 @@
 procesar_interfaz() {
     local intf=$1
     local ips=( $(ip addr show $intf | grep -o 'inet [0-9./]*' | awk '{print $2}') )
-    local routes=$(ip route | grep "$intf" | awk '{ if ($2 != "dev") { print "          - to: " $1 "\n            via: " $3 } }')
+    local routes=$(ip route | grep "$intf" | awk '{ if ($2 != "dev") { print "        - to: " $1 "\n          via: " $3 } }')
 
+    echo "    $intf:"
+    echo "      dhcp4: no"
     if [[ ${#ips[@]} -gt 0 ]]; then
-        echo "    $intf:"
-        echo "      dhcp4: no"
         echo "      addresses:"
         for ip in "${ips[@]}"; do
             echo "        - $ip"
         done
+    fi
 
-        if [[ $routes ]]; then
-            echo "      routes:"
-            echo "$routes"
-        fi
+    if [[ $routes ]]; then
+        echo "      routes:"
+        echo "$routes"
     fi
 }
 
@@ -32,7 +32,12 @@ procesar_vlan() {
     echo "    $vlan:"
     echo "        id: $id"
     echo "        link: $link"
-    echo "        addresses: [$ip]"
+    if [[ ${#ip[@]} -gt 0 ]]; then
+        echo "        addresses:"
+        for ip in "${ip[@]}"; do
+            echo "          - $ip"
+        done
+    fi
 
     if [[ $routes ]]; then
         echo "        routes:"
@@ -53,7 +58,7 @@ procesar_vlan() {
     done
 
     # Verificar si existen VLANs
-    vlan_list=$(ls /sys/class/net/ | grep 'vlan')
+    vlan_list=$(ls /sys/class/net/ | grep 'vlan' | sort -V)
     if [[ $vlan_list ]]; then
         echo "  vlans:"
 
@@ -62,4 +67,5 @@ procesar_vlan() {
             procesar_vlan $vlan
         done
     fi
-} > netplan.yaml
+} > 00-installer-config.yaml
+chmod 600 00-installer-config.yaml
