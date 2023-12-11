@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Este script de Bash crea un archivo de configuración de red en formato YAML para el sistema Netplan en sistemas Linux.
+# La configuración resultante incluye información sobre las interfaces de red físicas, sus direcciones IP y rutas,
+# así como las VLAN (Virtual LAN) configuradas en el sistema, incluyendo sus identificadores, enlaces, direcciones IP y rutas.
+
 # Función para procesar una interfaz de red
 procesar_interfaz() {
     local intf=$1
@@ -68,4 +72,6 @@ procesar_vlan() {
         done
     fi
 } > 00-installer-config.yaml
+
+
 chmod 600 00-installer-config.yaml
