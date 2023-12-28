@@ -4,6 +4,8 @@
 sudo apt-get update
 sudo apt-get upgrade -y
 
+sudo add-apt-repository ppa:ondrej/php
+
 # Instalar Apache, MySQL y PHP junto con las extensiones necesarias
 sudo apt-get install -y apache2 mysql-client mysql-server php7.4 libapache2-mod-php php7.4-pspell php7.4-curl php7.4-gd php7.4-intl php7.4-mysql php7.4-xml php7.4-xmlrpc php7.4-ldap php7.4-zip php7.4-soap php7.4-mbstring
 
