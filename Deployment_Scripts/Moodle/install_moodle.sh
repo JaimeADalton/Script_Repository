@@ -15,12 +15,6 @@ sudo apt-get install -y graphviz aspell ghostscript clamav git vim
 # Configurar MySQL (asignar contraseñas de forma segura en producción)
 sudo mysql_secure_installation
 
-# Configurar MySQL para Moodle
-echo "default_storage_engine = innodb" >> /etc/mysql/mysql.conf.d/mysqld.cnf
-echo "innodb_file_per_table = 1" >> /etc/mysql/mysql.conf.d/mysqld.cnf
-echo "innodb_file_format = Barracuda" >> /etc/mysql/mysql.conf.d/mysqld.cnf
-sudo service mysql restart
-
 # Crear base de datos Moodle y usuario
 DB_PASSWORD="passwordformoodledude" # Cambiar por una contraseña segura
 sudo mysql -e "CREATE DATABASE moodle DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
