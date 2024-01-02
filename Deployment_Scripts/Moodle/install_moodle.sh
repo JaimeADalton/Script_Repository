@@ -43,6 +43,10 @@ sudo a2enmod php8.1
 # Reiniciar Apache para cargar la configuración
 sudo service apache2 restart
 
+# Cambiar max_input_vars a 5000 en php.ini
+sed -i 's|;max_input_vars = 1000|max_input_vars = 5000|g' /etc/php/8.1/apache2/php.ini
+sed -i 's|;max_input_vars = 1000|max_input_vars = 5000|g' /etc/php/8.1/cli/php.ini
+
 # Cambiar los permisos de Moodle después de la instalación
 sudo chmod -R 0755 /var/www/html/moodle
 
