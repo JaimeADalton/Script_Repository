@@ -37,8 +37,7 @@ sudo chown -R www-data /var/moodledata
 sudo chmod -R 0777 /var/moodledata
 sudo chmod -R 0755 /var/www/html/moodle
 
-# Habilitar para apache php8.1 y deshabilitar el 7.4
-sudo a2dismod php7.4
+# Habilitar para apache php8.1
 sudo a2enmod php8.1
 
 # Reiniciar Apache para cargar la configuración
