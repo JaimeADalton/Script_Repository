@@ -43,7 +43,7 @@ function menu {
                 echo "Protocolo ICMP. Sondeando ..."
                 echo ""
                 while IFS= read -r ip; do
-                    ping -c 1 -W 1 -q "$ip" > /dev/null
+                    ping -c 1 -W 0.1 -q "$ip" > /dev/null
                     check_status "$ip"
                 done < <(read_ips)
                 ;;
