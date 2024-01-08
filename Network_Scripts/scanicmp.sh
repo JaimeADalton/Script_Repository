@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Colores
-ROJO="\e[31m"
-VERDE="\e[32m"
+RED="\e[31m"
+GREEN="\e[32m"
 END="\e[0m"
 
 archivo="ip.txt"
@@ -30,26 +30,26 @@ function icmp_ping {
 # Menú principal
 function menu {
     cleaner
-    PS3="¿Qué IPs desea mostrar?: "
-    options=("Solo Up" "Solo Down" "Ambas" "Salir")
+    PS3="Which IPs do you want to display? "
+    options=("Only Up" "Only Down" "Both" "Salir")
 
     select option in "${options[@]}"
     do
         case $option in
-            "Solo Up")
+            "Only Up")
                 show_ips "up"
                 ;;
-            "Solo Down")
+            "Only Down")
                 show_ips "down"
                 ;;
-            "Ambas")
+            "Both")
                 show_ips "both"
                 ;;
-            "Salir")
+            "Exit")
                 exit
                 ;;
             *)
-                echo "Opción inválida. Intente nuevamente."
+                echo "Invalid option. Please try again."
                 ;;
         esac
     done
@@ -58,22 +58,28 @@ function menu {
 # Muestra IPs según el estado seleccionado
 function show_ips {
     cleaner
-    echo "Sondeando ..."
+    if [[ $1 == "up" ]]; then
+        echo -e "${GREEN}UP DEVICES${END}"
+    elif [[ $1 == "both" ]]; then
+        echo "UP AND DOWN DEVICES"
+    else
+        echo -e "${RED}DOWN DEVICES${END}"
+    fi
     echo ""
     while IFS= read -r ip; do
         result=$(icmp_ping "$ip")
         case $1 in
             "up")
-                [[ $result -eq 0 ]] && echo -e "${VERDE}$ip\tUp${END}"
+                [[ $result -eq 0 ]] && echo -e "${GREEN}$ip${END}"
                 ;;
             "down")
-                [[ $result -ne 0 ]] && echo -e "${ROJO}$ip\tDown${END}"
+                [[ $result -ne 0 ]] && echo -e "${RED}$ip${END}"
                 ;;
             "both")
                 if [[ $result -eq 0 ]]; then
-                    echo -e "${VERDE}$ip\tUp${END}"
+                    echo -e "${GREEN}$ip\tUp${END}"
                 else
-                    echo -e "${ROJO}$ip\tDown${END}"
+                    echo -e "${RED}$ip\tDown${END}"
                 fi
                 ;;
         esac
