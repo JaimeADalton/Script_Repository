@@ -39,10 +39,13 @@ procesar_interfaz() {
 # Función para procesar una VLAN
 procesar_vlan() {
     local vlan=$1
-    local id=$(echo $vlan | grep -o '[0-9]*')
+    local id=$(echo $vlan | grep -oE '^vlan[0-9]+$')
+    if [ -z "$id" ]; then
+        return # No es una VLAN válida, salir de la función
+    fi
     local link=$(ip a s | grep $vlan@ | cut -d : -f2 | cut -d @ -f 2)
     local ip=$(ip addr show $vlan | grep -o 'inet [0-9./]*' | awk '{print $2}')
-    local routes=$(ip route | grep "$vlan" | awk '{ if ($2 != "dev") { print "up ip route add " $1 " via " $3 } }')
+    local routes=$(ip route | grep -w "$vlan" | awk '{ if ($2 != "dev") { print "up ip route add " $1 " via " $3 } }')
 
     echo "auto $vlan"
     echo "iface $vlan inet static"
