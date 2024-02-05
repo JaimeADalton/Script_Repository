@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Define el código de escape ANSI para el color verde
+GREEN='\033[0;32m'
+
+# Restablece el color a su valor predeterminado
+RESET_COLOR='\033[0m'
+
 # Function to install a specific Nagios instance
 install_nagios_instance() {
     INSTANCE_NAME=$1
@@ -20,7 +26,7 @@ install_nagios_instance() {
     sudo a2enmod cgi
 
     # Setting up nagiosadmin user for the web interface
-    echo "Please enter a password for 'nagiosadmin' for the instance in ${INSTANCE_PATH}:"
+    echo -e "${GREEN}Please enter a password for 'nagiosadmin' for the instance in ${INSTANCE_PATH}:${RESET_COLOR}"
     sudo htpasswd -c ${INSTANCE_PATH}/etc/htpasswd.users nagiosadmin
 
     # Installing Plugins
@@ -34,8 +40,15 @@ install_nagios_instance() {
     sudo systemctl restart apache2.service
     sudo systemctl start nagios.service
 
-    echo "Installation of Nagios Core at ${INSTANCE_PATH} completed. Access the web interface at http://[your-ip-address]/nagios with username 'nagiosadmin' and the provided password."
+    echo -e "${GREEN}Installation of Nagios Core at ${INSTANCE_PATH} completed. Access the web interface at http://[your-ip-address]/nagios with username 'nagiosadmin' and the provided password.${RESET_COLOR}"
 }
+# Add Nagios Core groups.
+sudo groupadd nagios
+sudo groupadd nagcmd
+
+# Add Nagios Core user
+sudo useradd -m -s /bin/bash -g nagios nagios
+sudo usermod -a -G nagcmd nagios
 
 # Update and prerequisites
 sudo apt-get update
@@ -57,7 +70,7 @@ sudo ufw allow Apache
 sudo ufw reload
 
 
-read -p "Nombre de la Instancia de Nagios: " instance_name
+read -pe "${GREEN}Nombre de la Instancia de Nagios: ${RESET_COLOR}" instance_name
 install_nagios_instance $instance_name
 
 #Pendiente de revision
