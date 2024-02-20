@@ -14,11 +14,11 @@ while read username; do
 
     mkdir /home/$username/.ssh
     # Generar un nuevo par de claves SSH para el usuario
-    ssh-keygen -t rsa -b 4096 -f /home/$username/.ssh/id_rsa -q -N ""
+    ssh-keygen -t ed25519 -a 200 -f /home/$username/.ssh/ed25519 -q -N ""
 
     # Añadir la clave pública al archivo authorized_keys del usuario
-    mv /home/$username/.ssh/id_rsa.pub /home/$username/.ssh/authorized_keys
-    mv /home/$username/.ssh/id_rsa /home/$username/.ssh/${username}_srvbastionssh.key
+    mv /home/$username/.ssh/ed25519.pub /home/$username/.ssh/authorized_keys
+    mv /home/$username/.ssh/ed25519 /home/$username/.ssh/${username}_srvbastionssh.key
 
     # Establecer los permisos del directorio personal del usuario y del archivo authorized_keys.
     chmod 700 /home/$username/.ssh
