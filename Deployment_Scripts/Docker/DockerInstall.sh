@@ -1,25 +1,40 @@
 #!/bin/bash
 
-# Establece la variable DEBIAN_FRONTEND en "noninteractive"
-export DEBIAN_FRONTEND=noninteractive
+# Detener la ejecución si ocurre cualquier error
+set -e
 
-# Add Docker's official GPG key:
+# Verificar la arquitectura del sistema
+ARCH=$(dpkg --print-architecture)
+if [[ ! "$ARCH" =~ ^(amd64|armhf|arm64|s390x|ppc64el)$ ]]; then
+    echo "La arquitectura $ARCH no es compatible."
+    exit 1
+fi
+
+# Desinstalar versiones antiguas
+echo "Desinstalando versiones antiguas..."
+sudo apt-get remove -y docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc || true
+
+# Borrando archivo lista de repositorio viejo
+rm /etc/apt/sources.list.d/docker.list
+
+# Configurar el repositorio de Docker
+echo "Configurando el repositorio de Docker..."
 sudo apt-get update
-sudo apt-get install ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo apt-get install -y ca-certificates curl gnupg lsb-release
 
-# Add the repository to Apt sources:
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Agregar la clave GPG oficial de Docker
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
-# Actualiza la lista de paquetes nuevamente antes de la instalación de Docker
-sudo apt-get update -q -y
+# Agregar el repositorio de Docker a APT
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Instala Docker y sus componentes
-sudo apt-get install -q -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo apt-get update
 
-# Restaura la variable DEBIAN_FRONTEND a su valor predeterminado
-unset DEBIAN_FRONTEND
+# Instalar Docker Engine, CLI, y Containerd
+echo "Instalando Docker Engine, CLI, y Containerd..."
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-# Fin del script
+echo "La instalación de Docker Engine ha sido exitosa."
