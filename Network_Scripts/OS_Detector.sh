@@ -72,7 +72,7 @@ for network in ${networks[@]}; do
     for host in {1..254}; do
         ip="$network.$host"
         # Realizar ping y capturar el valor TTL del paquete ICMP
-        ttl=$(ping -c 1 -W 0.1 $ip | grep 'ttl=' | sed -E 's/.*ttl=([0-9]+).*/\1/')
+        ttl=$(ping -c 1 -W 0.01 $ip | grep 'ttl=' | sed -E 's/.*ttl=([0-9]+).*/\1/')
         if [ ! -z "$ttl" ]; then
             os=$(get_os_by_ttl $ttl)
             os_groups[$os]+="$ip\n"
