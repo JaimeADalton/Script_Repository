@@ -80,7 +80,7 @@ for network in ${networks[@]}; do
             os_groups["Disconnected"]+="$ip\n"
         fi
         ((completed_ips++))
-        printf "\rProgress: %d/%d IPs processed (%.2f%%)" $completed_ips $total_ips $((completed_ips * 100 / total_ips))
+        printf "\rProgress: %d/%d IPs processed (%.f%%)" $completed_ips $total_ips $((completed_ips * 100 / total_ips))
     done
 done
 echo ""
