@@ -17,6 +17,5 @@ def scan_network(network):
 network = "192.168.252.0/24"
 devices = scan_network(network)
 
-print("Posibles puertas de enlace encontradas:")
 for device in devices:
     print(f"IP: {device['IP']}, MAC: {device['MAC']}")
