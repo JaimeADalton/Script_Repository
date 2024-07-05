@@ -1,13 +1,32 @@
 #!/bin/bash
 clear && clear
 
-# este script estará definido como shell para un usuario, de tal manera que cuando inicie sesion el usuario le saltará este wizard para configurar la red de la maquina. este script es un asistente interactivo que guía al usuario a través de la configuración de la red utilizando Netplan en una máquina Linux
+# Verifica y aplica los permisos correctos si no están establecidos
+if [[ $(stat -c "%a" /etc/netplan/00-installer-config.yaml) != "600" ]]; then
+  chmod 600 /etc/netplan/00-installer-config.yaml
+fi
 
-# Crea el archivo de configuración de Netplan
+# Verifica y aplica el propietario correcto si no está establecido
+if [[ $(stat -c "%U:%G" /etc/netplan/00-installer-config.yaml) != "root:root" ]]; then
+  chown root:root /etc/netplan/00-installer-config.yaml
+fi
+netplan apply 2> /dev/null
+
+# Espacios para separación visual
+echo ""
+echo ""
+echo ""
+echo "============================================"
+echo "       SCRIPT DE CONFIGURACIÓN DE RED"
+echo "============================================"
+echo ""
+
+# Archivo de configuración de Netplan
 netplan_config_file="netplan-config.yaml"
 
 # Función para imprimir un mensaje de bienvenida
 print_welcome() {
+  echo ""
   echo "============================================="
   echo "Asistente de configuración de Netplan en Bash"
   echo "============================================="
@@ -18,7 +37,12 @@ print_welcome() {
 print_interfaces() {
   echo "Interfaces de red disponibles:"
   for i in "${!network_interfaces[@]}"; do
-    echo "$((i+1)). ${network_interfaces[i]}"
+    interface="${network_interfaces[i]}"
+    ip_address=$(ip -4 addr show "$interface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    if [[ -z "$ip_address" ]]; then
+      ip_address="No IP"
+    fi
+    echo "$((i+1)). ${network_interfaces[i]} (IP: $ip_address)"
   done
   echo ""
 }
@@ -28,7 +52,7 @@ is_valid_ip_address() {
   local ip=$1
 
   if [[ -z $ip ]]; then
-    return 0
+    return 1
   fi
 
   if [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
@@ -44,10 +68,10 @@ is_valid_ip_address() {
   return 1
 }
 
-function is_valid_option() {
+# Función para validar una opción (s/n)
+is_valid_option() {
   [[ "$1" =~ ^(s|S|n|N)$ ]]
 }
-
 
 # Lista las interfaces de red disponibles, excluyendo las inalámbricas
 network_interfaces=($(ls /sys/class/net | grep -v '^wl'))
@@ -65,7 +89,7 @@ for index in "${selected_interfaces[@]}"; do
   interface="${network_interfaces[$((index-1))]}"
   echo "Configuración de la interfaz $interface:"
 
-  # Preguntar al usuario si desea continuar
+  static_ip_enabled=
   while ! is_valid_option "$static_ip_enabled"; do
     read -e -p "¿Desea configurar una dirección IP estática? [s/n]: " static_ip_enabled
   done
@@ -87,6 +111,13 @@ for index in "${selected_interfaces[@]}"; do
     read -e -p "Ingrese la puerta de enlace predeterminada (p. ej., 192.168.1.1): " gateway_address
   else
     dhcp4_enabled="yes"
+
+    # Mostrar la IP obtenida por DHCP
+    ip_address=$(ip -4 addr show "$interface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    if [[ -z "$ip_address" ]]; then
+      ip_address="No IP"
+    fi
+    echo "La IP obtenida por DHCP para la interfaz $interface es: $ip_address"
   fi
 
   interface_config="    $interface:\n      dhcp4: $dhcp4_enabled"
@@ -99,13 +130,14 @@ for index in "${selected_interfaces[@]}"; do
   fi
 
   if [[ "$static_ip_enabled" =~ ^(s|S)$ ]]; then
+    static_routes_enabled=
     # Pregunta si se deben configurar rutas estáticas
     while ! is_valid_option "$static_routes_enabled"; do
-      read -e -p "¿Desea configurar rutas estáticas adicionales? [s/n]: " static_routes_enabled
+      read -e -p "¿Desea configurar rutas estáticas adicionales? (s/n): " static_routes_enabled
     done
 
     if [[ "$static_routes_enabled" =~ ^(s|S)$ ]]; then
-      if [ -z $gateway_address ];then interface_config+="\n      routes:"; fi
+      if [ -z $gateway_address ]; then interface_config+="\n      routes:"; fi
       read -e -p "Ingrese el número de rutas estáticas a configurar: " num_static_routes
       for j in $(seq 1 $num_static_routes); do
         read -e -p "Ingrese la ruta $j (p. ej., 10.0.0.0/24 via 192.168.1.1): " static_route
@@ -115,9 +147,10 @@ for index in "${selected_interfaces[@]}"; do
   fi
 
   if [[ "$static_ip_enabled" =~ ^(s|S)$ ]]; then
-  # Pregunta si se deben configurar nameservers
+    nameservers_enabled=
+    # Pregunta si se deben configurar nameservers
     while ! is_valid_option "$nameservers_enabled"; do
-      read -e -p "¿Desea configurar nameservers? [s/n]: " nameservers_enabled
+      read -e -p "¿Desea configurar nameservers? (s/n): " nameservers_enabled
     done
 
     if [[ "$nameservers_enabled" =~ ^(s|S)$ ]]; then
@@ -149,13 +182,13 @@ network:
   ethernets:
 EOL
 
-for interface_config in "${interface_configs[@]}"
-  do
-    printf "%b\n" "$interface_config" >> "$netplan_config_file"
-  done
+for interface_config in "${interface_configs[@]}"; do
+  printf "%b\n" "$interface_config" >> "$netplan_config_file"
+done
 
 echo "Archivo de configuración de Netplan generado: ${netplan_config_file}"
 
+hostname_change_enabled=
 while ! is_valid_option "$hostname_change_enabled"; do
   read -e -p "¿Deseas cambiar el hostname de este equipo? [s/n]: " hostname_change_enabled
 done
@@ -167,14 +200,16 @@ if [[ "$hostname_change_enabled" =~ ^(s|S)$ ]]; then
   echo "Configurando nuevo hostname..."
   echo "$new_hostname" > /etc/hostname
   sed -i "s/127.0.1.1.*/127.0.1.1\t$new_hostname/g" /etc/hosts
-
+  hostname "$new_hostname"
   echo "El hostname ha sido cambiado exitosamente a '$new_hostname'."
 fi
-hostname_change_enabled=
-
 
 mv netplan-config.yaml /etc/netplan/00-installer-config.yaml
-netplan apply
+chmod 600 /etc/netplan/00-installer-config.yaml
+chown root:root /etc/netplan/00-installer-config.yaml
+netplan apply 2>/dev/null
 
-usermod --shell /bin/bash root
-bash
+if ! [[ $(grep root /etc/passwd | cut -d: -f7 | head -n 1) == "/bin/bash" ]]; then
+  usermod --shell /bin/bash root
+  bash
+fi
