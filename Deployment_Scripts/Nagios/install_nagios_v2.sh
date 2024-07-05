@@ -34,7 +34,7 @@ setup_nagios_user_and_groups() {
 download_and_install_nagios() {
     local nagios_version nagios_plugin_version nagioscore_tar nagios_plugins_tar
     nagios_version=$(curl -s https://github.com/NagiosEnterprises/nagioscore/releases | grep "f1 text-bold d-inline mr-3" | head -n 1 | awk -F">" '{print $3}' | awk -F "<" '{print $1}'| sed -e 's/Release\ //')
-    nagios_plugin_version=$(curl -s https://github.com/nagios-plugins/nagios-plugins/releases | grep '<h2 class="sr-only"' | head -n 1 | awk -F ">" '{print $2}' | awk -F "<" '{print $1}' | sed -E 's/Nagios\ Plugins\ //' | sed -E 's/\ Released//')
+    nagios_plugin_version=$(curl -s https://github.com/nagios-plugins/nagios-plugins/releases | grep 'Nagios Plugins' | grep "h2 class=\"sr-only\"" | head -n1 | cut -d">" -f2 | cut -d"<" -f1 | awk '{print $3}')
     nagioscore_tar="/tmp/nagioscore.tar.gz"
     nagios_plugins_tar="/tmp/nagios-plugins.tar.gz"
 
