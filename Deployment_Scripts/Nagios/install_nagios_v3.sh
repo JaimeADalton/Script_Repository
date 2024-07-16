@@ -117,9 +117,15 @@ install_nagios() {
 configure_apache_and_firewall() {
     log_message "$GREEN" "Configurando Apache y firewall..."
     run_command "sudo a2enmod rewrite cgi" "No se pudieron habilitar los módulos de Apache"
-    run_command "sudo ufw allow Apache" "No se pudo configurar el firewall para Apache"
-    run_command "sudo ufw allow ssh" "No se pudo configurar el firewall para SSH"
-    run_command "sudo ufw reload" "No se pudo recargar el firewall"
+
+    # Comprobar si el binario ufw está disponible
+    if command -v ufw >/dev/null 2>&1; then
+        run_command "sudo ufw allow Apache" "No se pudo configurar el firewall para Apache"
+        run_command "sudo ufw allow ssh" "No se pudo configurar el firewall para SSH"
+        run_command "sudo ufw reload" "No se pudo recargar el firewall"
+    else
+        log_message "$YELLOW" "Binario ufw no encontrado. Omitiendo la configuración del firewall."
+    fi
 }
 
 # Configurar acceso web de Nagios
