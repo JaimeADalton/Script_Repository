@@ -38,7 +38,7 @@ run_command() {
 update_and_install_prerequisites() {
     log_message "$GREEN" "Actualizando e instalando prerequisitos..."
     run_command "sudo apt-get update" "No se pudo actualizar la lista de paquetes"
-    run_command "sudo apt-get install -y apache2 autoconf bc build-essential dc gawk gcc gettext libapache2-mod-php7.4 libc6 libgd-dev libmcrypt-dev libnet-snmp-perl libssl-dev make openssl php snmp unzip wget" "No se pudieron instalar los paquetes necesarios"
+    run_command "sudo apt-get install -y apache2 autoconf bc build-essential dc gawk gcc gettext libapache2-mod-php7.4 libc6 libgd-dev libmcrypt-dev libnet-snmp-perl libssl-dev curl make openssl php snmp unzip wget" "No se pudieron instalar los paquetes necesarios"
 }
 
 # Configurar usuario y grupos de Nagios
