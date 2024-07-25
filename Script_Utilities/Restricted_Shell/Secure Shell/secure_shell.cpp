@@ -34,6 +34,11 @@
 #include <linux/capability.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/rotating_file_sink.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/ip_icmp.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
 
 const size_t MAX_BUFFER_SIZE = 4096;
 const int DEFAULT_MAX_ARGS = 10;
@@ -286,6 +291,93 @@ bool is_valid_hostname(const std::string& hostname) {
     return true;
 }
 
+bool is_port_open(const std::string& hostname, int port, std::shared_ptr<spdlog::logger> logger) {
+    struct addrinfo hints, *res;
+    int sockfd;
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    std::string port_str = std::to_string(port);
+    if (getaddrinfo(hostname.c_str(), port_str.c_str(), &hints, &res) != 0) {
+        logger->error("getaddrinfo failed for host: {}", hostname);
+        return false;
+    }
+
+    sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (sockfd < 0) {
+        logger->error("socket creation failed for host: {}", hostname);
+        freeaddrinfo(res);
+        return false;
+    }
+
+    // Set socket to non-blocking
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+
+    int connect_result = connect(sockfd, res->ai_addr, res->ai_addrlen);
+    if (connect_result < 0) {
+        if (errno == EINPROGRESS) {
+            fd_set fdset;
+            struct timeval tv;
+            FD_ZERO(&fdset);
+            FD_SET(sockfd, &fdset);
+            tv.tv_sec = 5;  // 5 second timeout
+            tv.tv_usec = 0;
+
+            if (select(sockfd + 1, NULL, &fdset, NULL, &tv) == 1) {
+                int so_error;
+                socklen_t len = sizeof so_error;
+                getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len);
+                if (so_error == 0) {
+                    logger->info("Port {} is open on host: {}", port, hostname);
+                    close(sockfd);
+                    freeaddrinfo(res);
+                    return true;
+                }
+            }
+        }
+        logger->warn("Port {} is closed on host: {}", port, hostname);
+        close(sockfd);
+        freeaddrinfo(res);
+        return false;
+    }
+
+    logger->info("Port {} is open on host: {}", port, hostname);
+    close(sockfd);
+    freeaddrinfo(res);
+    return true;
+}
+
+bool ping_host(const std::string& hostname, std::shared_ptr<spdlog::logger> logger) {
+    std::array<char, 128> buffer;
+    std::string result;
+    std::string cmd = "ping -c 1 -W 5 " + hostname + " 2>&1";
+
+    logger->info("Executing ping command: {}", cmd);
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        logger->error("popen() failed for ping command");
+        return false;
+    }
+
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+        result += buffer.data();
+    }
+
+    int ret_code = pclose(pipe);
+    logger->info("ping command returned: {}", ret_code);
+
+    if (ret_code == 0) {
+        logger->info("Host {} is reachable", hostname);
+        return true;
+    } else {
+        logger->warn("Host {} is not reachable", hostname);
+        return false;
+    }
+}
+
 void execute_command(const std::string &command, const std::vector<std::string> &args, const Config& config, std::shared_ptr<spdlog::logger> logger) {
     logger->info("Executing command: {} {}", command, std::accumulate(args.begin(), args.end(), std::string(),
                  [](const std::string& a, const std::string& b) { return a + (a.empty() ? "" : " ") + b; }));
@@ -495,6 +587,35 @@ int main(int argc, char* argv[]) {
                     std::cerr << "Error: Invalid hostname or IP address." << std::endl;
                     continue;
                 }
+
+                int ssh_port = 22;  // Default SSH port
+                auto port_it = std::find(tokens.begin(), tokens.end(), "-p");
+                if (port_it != tokens.end() && std::next(port_it) != tokens.end()) {
+                    ssh_port = std::stoi(*std::next(port_it));
+                }
+
+                if (!ping_host(hostname, logger)) {
+                    std::cerr << "Warning: Host " << hostname << " is not responding to ping." << std::endl;
+                    std::cout << "Do you want to continue? (yes/no): ";
+                    std::string response;
+                    std::getline(std::cin, response);
+                    if (response != "yes") {
+                        logger->info("SSH connection aborted by user for non-responsive host: {}", hostname);
+                        continue;
+                    }
+                }
+
+                if (!is_port_open(hostname, ssh_port, logger)) {
+                    std::cerr << "Warning: SSH port " << ssh_port << " is not open on host " << hostname << "." << std::endl;
+                    std::cout << "Do you want to continue? (yes/no): ";
+                    std::string response;
+                    std::getline(std::cin, response);
+                    if (response != "yes") {
+                        logger->info("SSH connection aborted by user for closed port on host: {}", hostname);
+                        continue;
+                    }
+                }
+
                 if (!check_ssh_key(hostname, logger)) {
                     if (!prompt_user_for_ssh_key(hostname)) {
                         logger->info("SSH connection aborted by user for host: {}", hostname);
