@@ -38,7 +38,8 @@
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
 #include <arpa/inet.h>
-#include <fcntl.h>
+#include <atomic>
+#include <future>
 
 const size_t MAX_BUFFER_SIZE = 4096;
 const int DEFAULT_MAX_ARGS = 10;
@@ -46,6 +47,12 @@ const int DEFAULT_MAX_ARG_LENGTH = 100;
 const int DEFAULT_COMMAND_TIMEOUT = 30;
 const std::string DEFAULT_LOG_FILE = "/var/log/secure_shell.log";
 const int DEFAULT_LOG_ROTATE_SIZE = 1048576; // 1MB
+
+const int MAX_SSH_CONNECTIONS = 5;
+std::atomic<int> current_ssh_connections(0);
+std::map<std::string, std::pair<int, std::chrono::steady_clock::time_point>> command_usage;
+std::map<std::string, int> ssh_failed_attempts;
+const int MAX_SSH_ATTEMPTS = 3;
 
 struct Config {
     int max_args;
@@ -134,6 +141,11 @@ bool is_safe_argument(const std::string &arg, const std::string &command, int ma
         {"tracepath", std::regex("^(-[nl]\\s*\\d+|-[bfhm]|\\d{1,3}(\\.\\d{1,3}){3}|[a-zA-Z0-9.-]+)$")}
     };
 
+    if (arg.find(';') != std::string::npos || arg.find('&') != std::string::npos || 
+        arg.find('|') != std::string::npos || arg.find('`') != std::string::npos) {
+        return false;
+    }
+
     if (command == "ssh") {
         return is_safe_ssh_argument(arg) && arg.length() <= max_arg_length;
     }
@@ -144,6 +156,21 @@ bool is_safe_argument(const std::string &arg, const std::string &command, int ma
     }
 
     return std::regex_match(arg, it->second) && arg.length() <= max_arg_length;
+}
+
+bool rate_limit_check(const std::string& command) {
+    const int MAX_COMMANDS_PER_MINUTE = 10;
+    auto now = std::chrono::steady_clock::now();
+    auto& usage = command_usage[command];
+    
+    if (now - usage.second > std::chrono::minutes(1)) {
+        usage = {1, now};
+    } else if (usage.first >= MAX_COMMANDS_PER_MINUTE) {
+        return false;
+    } else {
+        usage.first++;
+    }
+    return true;
 }
 
 std::string sanitize_input(const std::string& input) {
@@ -461,6 +488,18 @@ void execute_command(const std::string &command, const std::vector<std::string> 
     }
 }
 
+void execute_command_with_timeout(const std::string &command, const std::vector<std::string> &args, const Config& config, std::shared_ptr<spdlog::logger> logger) {
+    auto future = std::async(std::launch::async, [&]() {
+        execute_command(command, args, config, logger);
+    });
+
+    if (future.wait_for(std::chrono::seconds(config.command_timeout)) == std::future_status::timeout) {
+        logger->warn("Command timed out: {}", command);
+        kill(g_child_pid, SIGTERM);
+        std::cerr << "Error: Command execution timed out." << std::endl;
+    }
+}
+
 void drop_privileges() {
     cap_t caps;
 
@@ -515,6 +554,12 @@ void set_resource_limits() {
     }
 }
 
+bool is_valid_input(const std::string& input) {
+    return std::all_of(input.begin(), input.end(), [](char c) {
+        return std::isalnum(c) || c == ' ' || c == '-' || c == '.' || c == '@' || c == '_';
+    });
+}
+
 int main(int argc, char* argv[]) {
     try {
         std::string config_file = "/etc/secure_shell.conf";
@@ -554,6 +599,12 @@ int main(int argc, char* argv[]) {
 
             input = sanitize_input(input);
 
+            if (!is_valid_input(input)) {
+                logger->warn("Invalid input received: {}", input);
+                std::cerr << "Error: Invalid input." << std::endl;
+                continue;
+            }
+
             if (input.empty()) continue;
             if (input == "exit") {
                 logger->info("Exiting shell");
@@ -584,11 +635,23 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
+            if (!rate_limit_check(command)) {
+                logger->warn("Rate limit exceeded for command: {}", command);
+                std::cerr << "Error: Too many requests. Please try again later." << std::endl;
+                continue;
+            }
+
             if (command == "ssh") {
                 std::string hostname = extract_hostname(tokens.back());
                 if (!is_valid_hostname(hostname)) {
                     logger->warn("Invalid hostname or IP: {}", hostname);
                     std::cerr << "Error: Invalid hostname or IP address." << std::endl;
+                    continue;
+                }
+
+                if (ssh_failed_attempts[hostname] >= MAX_SSH_ATTEMPTS) {
+                    logger->warn("Too many failed SSH attempts for host: {}", hostname);
+                    std::cerr << "Error: Too many failed attempts. Host blocked." << std::endl;
                     continue;
                 }
 
@@ -598,6 +661,13 @@ int main(int argc, char* argv[]) {
                     ssh_port = std::stoi(*std::next(port_it));
                 }
 
+                if (current_ssh_connections >= MAX_SSH_CONNECTIONS) {
+                    logger->warn("Maximum number of SSH connections reached");
+                    std::cerr << "Error: Maximum number of SSH connections reached." << std::endl;
+                    continue;
+                }
+                current_ssh_connections++;
+
                 if (!ping_host(hostname, logger)) {
                     std::cerr << "Warning: Host " << hostname << " is not responding to ping." << std::endl;
                     std::cout << "Do you want to continue? (yes/no): ";
@@ -605,6 +675,7 @@ int main(int argc, char* argv[]) {
                     std::getline(std::cin, response);
                     if (response != "yes") {
                         logger->info("SSH connection aborted by user for non-responsive host: {}", hostname);
+                        current_ssh_connections--;
                         continue;
                     }
                 }
@@ -616,6 +687,7 @@ int main(int argc, char* argv[]) {
                     std::getline(std::cin, response);
                     if (response != "yes") {
                         logger->info("SSH connection aborted by user for closed port on host: {}", hostname);
+                        current_ssh_connections--;
                         continue;
                     }
                 }
@@ -624,17 +696,20 @@ int main(int argc, char* argv[]) {
                     if (!prompt_user_for_ssh_key(hostname)) {
                         logger->info("SSH connection aborted by user for host: {}", hostname);
                         std::cerr << "Error: Connection aborted by the user." << std::endl;
+                        current_ssh_connections--;
                         continue;
                     }
                     try {
                         if (!add_ssh_key(hostname, logger)) {
                             logger->error("Unable to add SSH host key for: {}", hostname);
                             std::cerr << "Error: Unable to add the host key for " << hostname << "." << std::endl;
+                            current_ssh_connections--;
                             continue;
                         }
                     } catch (const std::exception& e) {
                         logger->error("Error adding SSH host key: {}", e.what());
                         std::cerr << "Error: " << e.what() << std::endl;
+                        current_ssh_connections--;
                         continue;
                     }
                     logger->info("Added SSH host key for: {}", hostname);
@@ -647,6 +722,7 @@ int main(int argc, char* argv[]) {
             if (!all_args_safe) {
                 logger->warn("Invalid or unsafe arguments for command: {}", command);
                 std::cerr << "Error: Invalid or unsafe arguments." << std::endl;
+                if (command == "ssh") current_ssh_connections--;
                 continue;
             }
 
@@ -655,11 +731,13 @@ int main(int argc, char* argv[]) {
                          [](const std::string& a, const std::string& b) { return a + (a.empty() ? "" : " ") + b; }));
 
             try {
-                execute_command(command, tokens, config, logger);
+                execute_command_with_timeout(command, tokens, config, logger);
             } catch (const std::exception& e) {
                 logger->error("Error executing command: {}", e.what());
                 std::cerr << "Error executing command: " << e.what() << std::endl;
             }
+
+            if (command == "ssh") current_ssh_connections--;
         }
 
         logger->info("Secure shell ended");
