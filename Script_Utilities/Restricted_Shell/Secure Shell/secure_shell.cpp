@@ -149,7 +149,7 @@ bool is_safe_argument(const std::string &arg, const std::string &command, int ma
 std::string sanitize_input(const std::string& input) {
     std::string sanitized;
     std::copy_if(input.begin(), input.end(), std::back_inserter(sanitized),
-                 [](char c) { return std::isalnum(c) || c == ' ' || c == '-' || c == '.' || c == '@' || c == '_' || c == '/'; });
+                 [](char c) { return std::isalnum(c) || c == ' ' || c == '-' || c == '.' || c == '@' || c == '_'; });
     return sanitized;
 }
 
@@ -437,16 +437,20 @@ void execute_command(const std::string &command, const std::vector<std::string> 
             }
 
             if (FD_ISSET(STDIN_FILENO, &fd_in)) {
-                int bytes_read = read(STDIN_FILENO, buffer.data(), buffer.size());
+                ssize_t bytes_read = read(STDIN_FILENO, buffer.data(), buffer.size());
                 if (bytes_read <= 0) break;
-                write(master, buffer.data(), bytes_read);
+                if (write(master, buffer.data(), bytes_read) != bytes_read) {
+                    logger->error("Failed to write all bytes to master");
+                }
                 logger->info("User input: {}", std::string(buffer.data(), bytes_read));
             }
 
             if (FD_ISSET(master, &fd_in)) {
-                int bytes_read = read(master, buffer.data(), buffer.size());
+                ssize_t bytes_read = read(master, buffer.data(), buffer.size());
                 if (bytes_read <= 0) break;
-                write(STDOUT_FILENO, buffer.data(), bytes_read);
+                if (write(STDOUT_FILENO, buffer.data(), bytes_read) != bytes_read) {
+                    logger->error("Failed to write all bytes to stdout");
+                }
                 logger->info("Command output: {}", std::string(buffer.data(), bytes_read));
             }
         }
@@ -504,7 +508,7 @@ void set_resource_limits() {
         throw std::runtime_error("Failed to set memory limit: " + std::string(strerror(errno)));
     }
 
-    // Set CPU time limit (e.g., 60 segundos)
+    // Set CPU time limit (e.g., 60 seconds)
     rlim.rlim_cur = rlim.rlim_max = 60;
     if (setrlimit(RLIMIT_CPU, &rlim) != 0) {
         throw std::runtime_error("Failed to set CPU time limit: " + std::string(strerror(errno)));
