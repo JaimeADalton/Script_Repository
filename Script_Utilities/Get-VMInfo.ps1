@@ -1,6 +1,15 @@
-# Conectar al servidor vCenter (asegúrate de ajustar esto según tu entorno)
+# Definir el usuario fijo para vCenter
+$vCenterUser = "Change_Me_To_Username"
+$vCenterServer = "Change_Me_To_FQDN"
+
+# Solicitar la contraseña al usuario y crear un objeto de credencial
+$vCenterPassword = Read-Host "Introduce la contraseña para $vCenterUser" -AsSecureString
+$credential = New-Object System.Management.Automation.PSCredential($vCenterUser, $vCenterPassword)
+
+# Conectar al servidor vCenter
 try {
-    Connect-VIServer -Server "Change_Me_To_FQDN" -ErrorAction Stop
+    Connect-VIServer -Server $vCenterServer -Credential $credential -ErrorAction Stop
+    Write-Output "Conexión exitosa a vCenter como $vCenterUser"
 }
 catch {
     Write-Error "No se pudo conectar al servidor vCenter: $_"
@@ -23,26 +32,31 @@ function Get-DetailedVMInfo {
     }
 }
 
+function Remove-LeadingTrailingSpaces {
+    param([string]$inputString)
+    return $inputString.Trim()
+}
+
 try {
     while ($true) {
-        $searchType = Read-Host "¿Deseas buscar por MAC, IP o nombre de VM? (Escribe 'MAC', 'IP', 'NAME' o 'q' para salir)"
+        $searchType = Remove-LeadingTrailingSpaces (Read-Host "¿Deseas buscar por MAC, IP o nombre de VM? (Escribe 'MAC', 'IP', 'NAME' o 'q' para salir)")
         if ($searchType.ToLower() -eq 'q') {
             break
         }
         if ($searchType.ToUpper() -eq 'MAC') {
-            $macAddress = Read-Host "Introduce la dirección MAC (completa o parcial)"
+            $macAddress = Remove-LeadingTrailingSpaces (Read-Host "Introduce la dirección MAC (completa o parcial)")
             $vms = Get-VM | Where-Object {
                 $_.Guest.ExtensionData.Net.MacAddress | Where-Object { $_ -like "*$macAddress*" }
             }
         }
         elseif ($searchType.ToUpper() -eq 'IP') {
-            $ipAddress = Read-Host "Introduce la dirección IP (completa o parcial)"
+            $ipAddress = Remove-LeadingTrailingSpaces (Read-Host "Introduce la dirección IP (completa o parcial)")
             $vms = Get-VM | Where-Object {
                 $_.Guest.ExtensionData.Net.IpAddress | Where-Object { $_ -like "*$ipAddress*" }
             }
         }
         elseif ($searchType.ToUpper() -eq 'NAME') {
-            $vmName = Read-Host "Introduce el nombre (completo o parcial) de la máquina virtual"
+            $vmName = Remove-LeadingTrailingSpaces (Read-Host "Introduce el nombre (completo o parcial) de la máquina virtual")
             $vms = Get-VM -Name "*$vmName*"
         }
         else {
