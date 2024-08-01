@@ -5,6 +5,7 @@ $vCenterServer = "Change_Me_To_FQDN"
 # Solicitar la contraseña al usuario y crear un objeto de credencial
 $vCenterPassword = Read-Host "Introduce la contraseña para $vCenterUser" -AsSecureString
 $credential = New-Object System.Management.Automation.PSCredential($vCenterUser, $vCenterPassword)
+$DebugPreference = "SilentlyContinue"
 
 # Conectar al servidor vCenter
 try {
@@ -37,31 +38,82 @@ function Remove-LeadingTrailingSpaces {
     return $inputString.Trim()
 }
 
+$GetInputTypeScriptBlock = {
+    param($input)
+
+    if ([string]::IsNullOrEmpty($input)) {
+        return 'UNKNOWN'
+    }
+
+    $input = $input.Trim()
+
+    if ($input -match '^(\d{1,3}\.){3}\d{1,3}$') {
+        $octets = $input.Split('.')
+        if ($octets.Count -eq 4 -and $octets | ForEach-Object { [int]$_ -ge 0 -and [int]$_ -le 255 }) {
+            return 'IP Completa'
+        }
+    }
+
+    if ($input -match '^(\d{1,3}\.){0,2}\d{1,3}$') {
+        $octets = $input.Split('.')
+        if ($octets | ForEach-Object { $_ -match '^\d{1,3}$' -and [int]$_ -ge 0 -and [int]$_ -le 255 }) {
+            return 'IP Parcial'
+        }
+    }
+
+    if ($input -match '^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$') {
+        return 'MAC Completa'
+    }
+
+    if ($input -match '^([0-9A-Fa-f]{1,2}[:-]){0,5}[0-9A-Fa-f]{1,2}$') {
+        return 'MAC Parcial'
+    }
+
+    if ($input -match '^[a-zA-Z0-9\-_\.]+$') {
+        return 'NAME'
+    }
+
+    return 'UNKNOWN'
+}
+
 try {
     while ($true) {
-        $searchType = Remove-LeadingTrailingSpaces (Read-Host "¿Deseas buscar por MAC, IP o nombre de VM? (Escribe 'MAC', 'IP', 'NAME' o 'q' para salir)")
-        if ($searchType.ToLower() -eq 'q') {
+        $searchInput = Remove-LeadingTrailingSpaces (Read-Host "Introduce IP, MAC o nombre de VM (o 'q' para salir)")
+        if ($searchInput.ToLower() -eq 'q') {
             break
         }
-        if ($searchType.ToUpper() -eq 'MAC') {
-            $macAddress = Remove-LeadingTrailingSpaces (Read-Host "Introduce la dirección MAC (completa o parcial)")
-            $vms = Get-VM | Where-Object {
-                $_.Guest.ExtensionData.Net.MacAddress | Where-Object { $_ -like "*$macAddress*" }
+
+        $searchType = Invoke-Command -ScriptBlock $GetInputTypeScriptBlock -ArgumentList $searchInput
+
+        $vms = @()
+        switch ($searchType) {
+            'IP Completa' {
+                $vms = Get-VM | Where-Object {
+                    $_.Guest.IPAddress -contains $searchInput
+                }
             }
-        }
-        elseif ($searchType.ToUpper() -eq 'IP') {
-            $ipAddress = Remove-LeadingTrailingSpaces (Read-Host "Introduce la dirección IP (completa o parcial)")
-            $vms = Get-VM | Where-Object {
-                $_.Guest.ExtensionData.Net.IpAddress | Where-Object { $_ -like "*$ipAddress*" }
+            'IP Parcial' {
+                $vms = Get-VM | Where-Object {
+                    $_.Guest.IPAddress | Where-Object { $_ -like "*$searchInput*" }
+                }
             }
-        }
-        elseif ($searchType.ToUpper() -eq 'NAME') {
-            $vmName = Remove-LeadingTrailingSpaces (Read-Host "Introduce el nombre (completo o parcial) de la máquina virtual")
-            $vms = Get-VM -Name "*$vmName*"
-        }
-        else {
-            Write-Output "Opción no válida. Por favor, escribe 'MAC', 'IP', 'NAME' o 'q' para salir."
-            continue
+            'MAC Completa' {
+                $vms = Get-VM | Where-Object {
+                    $_.ExtensionData.Config.Hardware.Device | 
+                    Where-Object { $_ -is [VMware.Vim.VirtualEthernetCard] } |
+                    Where-Object { $_.MacAddress -eq $searchInput }
+                }
+            }
+            'MAC Parcial' {
+                $vms = Get-VM | Where-Object {
+                    $_.ExtensionData.Config.Hardware.Device | 
+                    Where-Object { $_ -is [VMware.Vim.VirtualEthernetCard] } |
+                    Where-Object { $_.MacAddress -like "*$searchInput*" }
+                }
+            }
+            'NAME' {
+                $vms = Get-VM -Name "*$searchInput*"
+            }
         }
 
         if ($vms) {
@@ -87,3 +139,5 @@ finally {
         Write-Error "Error al desconectar del servidor vCenter: $_"
     }
 }
+
+
