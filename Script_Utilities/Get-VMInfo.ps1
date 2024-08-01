@@ -5,7 +5,7 @@ $vCenterServer = "Change_Me_To_FQDN"
 # Solicitar la contraseña al usuario y crear un objeto de credencial
 $vCenterPassword = Read-Host "Introduce la contraseña para $vCenterUser" -AsSecureString
 $credential = New-Object System.Management.Automation.PSCredential($vCenterUser, $vCenterPassword)
-$DebugPreference = "SilentlyContinue"
+#$DebugPreference = "SilentlyContinue"
 
 # Conectar al servidor vCenter
 try {
