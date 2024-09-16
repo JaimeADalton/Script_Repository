@@ -134,10 +134,9 @@ def configure_interface(iface: str) -> Dict[str, Any]:
                 break
 
         config["addresses"] = [ip]
-        config["gateway4"] = gateway
+        config["routes"] = [{"to": "default", "via": gateway}]
 
-        if get_user_input("¿Desea añadir rutas estáticas? (s/n): ", lambda x: x.lower() in ['s', 'n']) == 's':
-            config["routes"] = []
+        if get_user_input("¿Desea añadir rutas estáticas adicionales? (s/n): ", lambda x: x.lower() in ['s', 'n']) == 's':
             while True:
                 to = get_user_input("Ingrese la red de destino (ej. 192.168.2.0/24) o 'q' para terminar: ",
                                     lambda x: x.lower() == 'q' or is_valid_cidr(x))
@@ -308,7 +307,7 @@ def simulate_config(config: Dict[str, Any]):
             print("  Configuración: DHCP")
         else:
             print(f"  IP: {settings.get('addresses', ['No configurada'])[0]}")
-            print(f"  Gateway: {settings.get('gateway4', 'No configurado')}")
+            print(f"  Gateway: {settings.get('routes', [{'via': 'No configurado'}])[0]['via']}")
         if 'nameservers' in settings:
             print(f"  DNS: {', '.join(settings['nameservers'].get('addresses', []))}")
         if 'routes' in settings:
