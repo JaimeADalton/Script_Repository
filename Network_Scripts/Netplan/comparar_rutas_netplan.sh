@@ -56,19 +56,34 @@ awk '
 ' "$NETPLAN_FILE" | sort | uniq > "$NETPLAN_ROUTES"
 
 # Paso 3: Comparar listas de rutas y eliminar líneas en blanco
+# Rutas que están en el sistema pero no en Netplan (rutas faltantes en Netplan)
 missing_routes=$(comm -23 "$SYSTEM_ROUTES" "$NETPLAN_ROUTES" | grep -v '^$')
+
+# Rutas que están en Netplan pero no en el sistema (rutas obsoletas en Netplan)
+obsolete_routes=$(comm -13 "$SYSTEM_ROUTES" "$NETPLAN_ROUTES" | grep -v '^$')
 
 # Paso 4: Contar las rutas
 system_count=$(wc -l < "$SYSTEM_ROUTES")
 netplan_count=$(wc -l < "$NETPLAN_ROUTES")
 missing_count=$(echo "$missing_routes" | grep -c '^[^ ]')
+obsolete_count=$(echo "$obsolete_routes" | grep -c '^[^ ]')
 
 # Paso 5: Mostrar los resultados
 if [ "$missing_count" -eq 0 ]; then
-    echo "Todas las rutas actuales están definidas en $NETPLAN_FILE."
+    echo "Todas las rutas del sistema están definidas en $NETPLAN_FILE."
 else
-    echo "Rutas faltantes en $NETPLAN_FILE:"
+    echo "Rutas faltantes en $NETPLAN_FILE (definidas en el sistema, pero no en Netplan):"
     echo "$missing_routes" | while read -r route; do
+        [ -n "$route" ] && echo " - $route"
+    done
+fi
+
+# Mostrar las rutas obsoletas que están en Netplan pero no en el sistema
+if [ "$obsolete_count" -eq 0 ]; then
+    echo "Todas las rutas de Netplan están activas en el sistema."
+else
+    echo "Rutas obsoletas en $NETPLAN_FILE (definidas en Netplan, pero no en el sistema):"
+    echo "$obsolete_routes" | while read -r route; do
         [ -n "$route" ] && echo " - $route"
     done
 fi
@@ -78,3 +93,4 @@ echo ""
 echo "Total rutas en ip route con 'via': $system_count"
 echo "Total rutas en Netplan: $netplan_count"
 echo "Rutas faltantes: $missing_count"
+echo "Rutas obsoletas: $obsolete_count"
