@@ -259,11 +259,15 @@ def add_agent():
             selected_indices_input = input("Ingresa los números de las interfaces a monitorizar, separados por espacios: ").strip()
             selected_indices = [s.strip() for s in selected_indices_input.split() if s.strip().isdigit()]
             selected_indices = [int(s) for s in selected_indices]
-
+        
             selected_interfaces = []
             for idx in selected_indices:
                 if 1 <= idx <= len(interfaces):
-                    selected_interfaces.append(interfaces[idx -1])
+                    if_index, if_descr = interfaces[idx -1]
+                    # Solicitar device_alias para cada interfaz
+                    device_alias_interface = input(f"Introduce el alias para la interfaz '{if_descr}' (o deja en blanco para usar '{device_alias}'): ").strip()
+                    device_alias_final = device_alias_interface if device_alias_interface else device_alias
+                    selected_interfaces.append((if_index, if_descr, device_alias_final))
                 else:
                     print(f"Número de interfaz inválido: {idx}")
 
@@ -274,7 +278,6 @@ def add_agent():
             # Generar la configuración para las interfaces seleccionadas
             config_content = generate_selected_interfaces_config(
                 agent_ip,
-                device_alias,
                 sede,
                 selected_interfaces,
                 snmp_version
@@ -337,15 +340,11 @@ def get_interfaces(agent_ip, community, mp_model):
             interfaces.append((str(if_index), value))
     return interfaces
 
-def generate_selected_interfaces_config(agent_ip, device_alias, table_name, selected_interfaces, snmp_version):
+def generate_selected_interfaces_config(agent_ip, table_name, selected_interfaces, snmp_version):
     """Genera la configuración de Telegraf para las interfaces seleccionadas."""
-    config = f"""# Configuración común para todas las interfaces
-[global_tags]
-  device_alias = "{device_alias}"
+    config = ""
 
-"""
-
-    for if_index, if_descr in selected_interfaces:
+    for if_index, if_descr, device_alias in selected_interfaces:
         config += f"""# Configuración SNMP para la interfaz {if_descr} (índice {if_index})
 [[inputs.snmp]]
   name = "{table_name}"
@@ -360,6 +359,7 @@ def generate_selected_interfaces_config(agent_ip, device_alias, table_name, sele
 
   [inputs.snmp.tags]
     ifDescr = "{if_descr}"
+    device_alias = "{device_alias}"
 
   [[inputs.snmp.field]]
     name = "hostname"
