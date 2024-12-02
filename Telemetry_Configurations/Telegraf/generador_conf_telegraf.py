@@ -3,8 +3,6 @@ import os
 import re
 import sys
 from pysnmp.hlapi import *
-import psutil
-import signal
 
 # Ruta base donde están las configuraciones de las sedes
 TELEGRAF_DIR = '/etc/telegraf/telegraf.d'
@@ -22,7 +20,7 @@ TEMPLATE_ALL_INTERFACES = """
   agent_host_tag = "source"
 
   [inputs.snmp.tags]
-    device_alias = "{device_alias_with_ip}"
+    snmp_device_alias = "{device_alias_with_ip}"
 
   [[inputs.snmp.field]]
     name = "hostname"
@@ -47,7 +45,7 @@ TEMPLATE_ALL_INTERFACES = """
       oid = "IF-MIB::ifHCOutOctets"
 """
 
-# Nueva Plantilla para monitoreo ICMP
+# Plantilla para monitoreo ICMP
 TEMPLATE_ICMP = """
 [[inputs.ping]]
   urls = ["{agent_ip}"]
@@ -56,13 +54,16 @@ TEMPLATE_ICMP = """
   name_override = "{table_name}"
 
   [inputs.ping.tags]
-    device_alias = "{device_alias_with_ip}"
+    icmp_device_alias = "{device_alias_with_ip}"
 
 [[processors.rename]]
   [[processors.rename.replace]]
     tag = "url"
     dest = "source"
 """
+
+import psutil
+import signal
 
 def list_sedes():
     """Lista los subdirectorios en TELEGRAF_DIR que representan las sedes, ordenados alfabéticamente."""
@@ -211,13 +212,9 @@ def reload_telegraf():
     """Recarga Telegraf enviando una señal SIGHUP al proceso."""
     for proc in psutil.process_iter(['pid', 'name']):
         if proc.info['name'] == 'telegraf':
-            try:
-                os.kill(proc.info['pid'], signal.SIGHUP)
-                print("Telegraf recargado exitosamente.")
-                return
-            except Exception as e:
-                print(f"Error al recargar Telegraf: {e}")
-                return
+            os.kill(proc.info['pid'], signal.SIGHUP)
+            print("Telegraf recargado exitosamente.")
+            return
     print("No se encontró el proceso Telegraf.")
 
 def add_agent():
@@ -317,6 +314,8 @@ def add_agent():
                         table_name=sede,
                         snmp_version=snmp_version
                     )
+                    # Para ICMP, usar el alias del dispositivo
+                    icmp_device_alias_with_ip = device_alias_with_ip
                     break
 
                 elif choice == '2':
@@ -359,13 +358,23 @@ def add_agent():
                         selected_interfaces,
                         snmp_version
                     )
+
+                    # Determinar el alias para la configuración ICMP
+                    if len(selected_interfaces) == 1:
+                        # Usar el alias de la única interfaz seleccionada
+                        icmp_device_alias_with_ip = f"{selected_interfaces[0][2]}: {agent_ip}"
+                    else:
+                        # Si hay múltiples interfaces, puedes optar por concatenar los alias o pedir al usuario que elija
+                        # Por simplicidad, usaremos el alias de la primera interfaz
+                        icmp_device_alias_with_ip = f"{selected_interfaces[0][2]}: {agent_ip}"
+
                     break
 
                 else:
                     print("Opción inválida. Por favor, elige 1 o 2.")
 
             # Rutas de los archivos de configuración
-            config_filename = f"config_{agent_ip}.conf"
+            config_filename = f"snmp_{agent_ip}.conf"
             config_path = os.path.join(TELEGRAF_DIR, sede, config_filename)
 
             icmp_config_filename = f"icmp_{agent_ip}.conf"
@@ -375,7 +384,7 @@ def add_agent():
             icmp_config_content = TEMPLATE_ICMP.format(
                 agent_ip=agent_ip,
                 table_name=sede,
-                device_alias_with_ip=device_alias_with_ip
+                device_alias_with_ip=icmp_device_alias_with_ip
             )
 
             # Verificar si los archivos ya existen
