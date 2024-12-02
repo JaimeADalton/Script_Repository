@@ -495,7 +495,7 @@ def delete_agent():
             continue
 
         config_filenames = [
-            f"config_{agent_ip}.conf",
+            f"snmp_{agent_ip}.conf",
             f"icmp_{agent_ip}.conf"
         ]
         archivos_eliminados = []
