@@ -3,6 +3,8 @@ import os
 import re
 import sys
 from pysnmp.hlapi import *
+import psutil
+import signal
 
 # Ruta base donde están las configuraciones de las sedes
 TELEGRAF_DIR = '/etc/telegraf/telegraf.d'
@@ -13,14 +15,14 @@ TEMPLATE_ALL_INTERFACES = """
   precision = "30s"
   interval = "30s"
   agents = ['{agent_ip}']
-  version = 2
+  version = {snmp_version}
   community = "GestionGrp"
   timeout = "5s"
   retries = 1
   agent_host_tag = "source"
 
   [inputs.snmp.tags]
-    device_alias = "{device_alias}"
+    device_alias = "{device_alias_with_ip}"
 
   [[inputs.snmp.field]]
     name = "hostname"
@@ -43,6 +45,23 @@ TEMPLATE_ALL_INTERFACES = """
     [[inputs.snmp.table.field]]
       name = "ifHCOutOctets"
       oid = "IF-MIB::ifHCOutOctets"
+"""
+
+# Nueva Plantilla para monitoreo ICMP
+TEMPLATE_ICMP = """
+[[inputs.ping]]
+  urls = ["{agent_ip}"]
+  count = 1
+  interval = "5s"
+  name_override = "{table_name}"
+
+  [inputs.ping.tags]
+    device_alias = "{device_alias_with_ip}"
+
+[[processors.rename]]
+  [[processors.rename.replace]]
+    tag = "url"
+    dest = "source"
 """
 
 def list_sedes():
@@ -89,10 +108,11 @@ def prompt_yes_no(prompt):
 def snmp_get(ip, community, oid, version):
     """Realiza una consulta SNMP para obtener un valor desde un agente SNMP."""
     try:
+        print(f"Realizando consulta SNMP para obtener el hostname de {ip}...")
         iterator = getCmd(
             SnmpEngine(),
             CommunityData(community, mpModel=version),  # SNMP version 2c
-            UdpTransportTarget((ip, 161), timeout=5, retries=3),
+            UdpTransportTarget((ip, 161), timeout=5, retries=1),
             ContextData(),
             ObjectType(ObjectIdentity(oid))
         )
@@ -119,12 +139,13 @@ def snmp_walk(ip, community, oid, version):
     """Realiza un SNMP walk para obtener una tabla de valores."""
     result = []
     try:
+        print(f"Consultando interfaces del agente {ip}...")
         for (error_indication,
              error_status,
              error_index,
              var_binds) in nextCmd(SnmpEngine(),
                                    CommunityData(community, mpModel=version),
-                                   UdpTransportTarget((ip, 161), timeout=5, retries=3),
+                                   UdpTransportTarget((ip, 161), timeout=5, retries=1),
                                    ContextData(),
                                    ObjectType(ObjectIdentity(oid)),
                                    lexicographicMode=False):
@@ -145,167 +166,254 @@ def snmp_walk(ip, community, oid, version):
         print(f"Excepción durante el SNMP WALK: {e}")
         return []
 
+def generate_selected_interfaces_config(agent_ip, table_name, selected_interfaces, snmp_version):
+    """Genera la configuración de Telegraf para las interfaces seleccionadas."""
+    config = ""
+
+    for if_index, if_descr, device_alias in selected_interfaces:
+        # Construir device_alias con el formato deseado: "nombre: IP"
+        device_alias_with_ip = f"{device_alias}: {agent_ip}"
+
+        config += f"""# Configuración SNMP para la interfaz {if_descr} (índice {if_index})
+[[inputs.snmp]]
+  name = "{table_name}"
+  agents = ['{agent_ip}']
+  version = {snmp_version}
+  community = "GestionGrp"
+  interval = "30s"
+  precision = "30s"
+  timeout = "5s"
+  retries = 1
+  agent_host_tag = "source"
+
+  [inputs.snmp.tags]
+    ifDescr = "{if_descr}"
+    device_alias = "{device_alias_with_ip}"
+
+  [[inputs.snmp.field]]
+    name = "hostname"
+    oid = "RFC1213-MIB::sysName.0"
+    is_tag = true
+
+  [[inputs.snmp.field]]
+    name = "ifHCInOctets"
+    oid = "IF-MIB::ifHCInOctets.{if_index}"
+
+  [[inputs.snmp.field]]
+    name = "ifHCOutOctets"
+    oid = "IF-MIB::ifHCOutOctets.{if_index}"
+
+"""
+
+    return config
+
+def reload_telegraf():
+    """Recarga Telegraf enviando una señal SIGHUP al proceso."""
+    for proc in psutil.process_iter(['pid', 'name']):
+        if proc.info['name'] == 'telegraf':
+            try:
+                os.kill(proc.info['pid'], signal.SIGHUP)
+                print("Telegraf recargado exitosamente.")
+                return
+            except Exception as e:
+                print(f"Error al recargar Telegraf: {e}")
+                return
+    print("No se encontró el proceso Telegraf.")
+
 def add_agent():
     """Función para añadir uno o más nuevos agentes SNMP."""
-    sedes = list_sedes()
+    while True:
+        sedes = list_sedes()
 
-    if not sedes:
-        print("No hay sedes disponibles.")
-        add_new_sede = prompt_yes_no("¿Deseas añadir una nueva sede? (s/n): ")
-        if not add_new_sede:
-            return
-        else:
-            sede = create_new_sede()
-            if not sede:
+        if not sedes:
+            print("No hay sedes disponibles.")
+            add_new_sede = prompt_yes_no("¿Deseas añadir una nueva sede? (s/n): ")
+            if not add_new_sede:
                 return
-    else:
-        print("\nSelecciona la sede o escribe su nombre:")
-        for i, sede in enumerate(sedes):
-            print(f"{i + 1}. {sede}")
-        print(f"{len(sedes) + 1}. Añadir nueva sede")
-
-        sede_input = input("Elige un número o escribe el nombre de la sede: ").strip()
-
-        if sede_input.isdigit():
-            index = int(sede_input) - 1
-            if 0 <= index < len(sedes):
-                sede = sedes[index]
-            elif index == len(sedes):
+            else:
                 sede = create_new_sede()
                 if not sede:
                     return
-            else:
-                print("Opción inválida.")
-                return
         else:
-            sede_input = sede_input.strip()
-            sede_lower = sede_input.lower()
-            sedes_lower = [s.lower() for s in sedes]
-            if sede_lower in sedes_lower:
-                sede = sedes[sedes_lower.index(sede_lower)]
-            else:
-                sede = create_new_sede(sede_input)
-                if not sede:
-                    return
+            print("\nSelecciona la sede o escribe su nombre:")
+            for i, sede in enumerate(sedes):
+                print(f"{i + 1}. {sede}")
+            print(f"{len(sedes) + 1}. Añadir nueva sede")
 
-    # Solicitar cuántas IPs se van a introducir
-    while True:
-        num_ips_input = input("Ingresa cuántas direcciones IP vas a introducir: ").strip()
-        if num_ips_input.isdigit() and int(num_ips_input) > 0:
-            num_ips = int(num_ips_input)
-            break
-        else:
-            print("Por favor, ingresa un número válido mayor que cero.")
+            sede_input = input("Elige un número o escribe el nombre de la sede: ").strip()
 
-    for _ in range(num_ips):
-        agent_ip = input("Introduce la IP del agente SNMP: ").strip()
-
-        if not is_valid_ip(agent_ip):
-            print("IP inválida. Por favor, introduce una dirección IP válida.")
-            continue
-
-        snmp_version = 2
-        mp_model = 1  # Correspondiente a SNMPv2c
-
-        community = 'GestionGrp'  # Comunidad SNMP por defecto
-
-        # Consultamos SNMP para obtener el hostname
-        oid_hostname = '1.3.6.1.2.1.1.5.0'  # OID numérico para el hostname
-        hostname = snmp_get(agent_ip, community, oid_hostname, mp_model)
-
-        if hostname:
-            print(f"Hostname capturado por SNMP: {hostname}")
-        else:
-            print("No se pudo capturar el hostname por SNMP. Se usará 'UNKNOWN' como alias por defecto.")
-            hostname = "UNKNOWN"
-
-        # Sugerencia para el `device_alias`
-        device_alias_input = input(f"Introduce el alias del dispositivo (sugerencia: {hostname}): ").strip()
-        device_alias = device_alias_input if device_alias_input else hostname
-
-        # Preguntar si desea monitorizar todas las interfaces o elegir las interfaces
-        print("¿Deseas monitorizar todas las interfaces o elegir las interfaces a monitorizar?")
-        print("1. Monitorizar todas las interfaces")
-        print("2. Elegir las interfaces a monitorizar")
-        choice = input("Elige una opción (1 o 2): ").strip()
-
-        if choice == '1':
-            # Generar configuración para monitorizar todas las interfaces
-            config_content = TEMPLATE_ALL_INTERFACES.format(
-                agent_ip=agent_ip,
-                device_alias=device_alias,
-                table_name=sede
-            )
-
-            # Nombre del archivo .conf
-            default_filename = f"config_{agent_ip}.conf"
-            config_filename = input(f"Introduce el nombre para el archivo de configuración (sugerencia: {default_filename}): ").strip()
-            config_filename = config_filename if config_filename else default_filename
-            config_path = os.path.join(TELEGRAF_DIR, sede, config_filename)
-
-        elif choice == '2':
-            # Obtener la lista de interfaces usando OIDs numéricos
-            interfaces = get_interfaces(agent_ip, community, mp_model)
-            if not interfaces:
-                print("No se pudieron obtener las interfaces del agente SNMP.")
-                continue
-
-            # Mostrar las interfaces al usuario
-            print("\nInterfaces disponibles:")
-            for i, (if_index, if_descr) in enumerate(interfaces):
-                print(f"{i+1}. {if_descr} (Index: {if_index})")
-
-            # Pedir al usuario que seleccione las interfaces
-            selected_indices_input = input("Ingresa los números de las interfaces a monitorizar, separados por espacios: ").strip()
-            selected_indices = [s.strip() for s in selected_indices_input.split() if s.strip().isdigit()]
-            selected_indices = [int(s) for s in selected_indices]
-        
-            selected_interfaces = []
-            for idx in selected_indices:
-                if 1 <= idx <= len(interfaces):
-                    if_index, if_descr = interfaces[idx -1]
-                    # Solicitar device_alias para cada interfaz
-                    device_alias_interface = input(f"Introduce el alias para la interfaz '{if_descr}' (o deja en blanco para usar '{device_alias}'): ").strip()
-                    device_alias_final = device_alias_interface if device_alias_interface else device_alias
-                    selected_interfaces.append((if_index, if_descr, device_alias_final))
+            if sede_input.isdigit():
+                index = int(sede_input) - 1
+                if 0 <= index < len(sedes):
+                    sede = sedes[index]
+                elif index == len(sedes):
+                    sede = create_new_sede()
+                    if not sede:
+                        return
                 else:
-                    print(f"Número de interfaz inválido: {idx}")
+                    print("Opción inválida.")
+                    continue
+            else:
+                sede_input = sede_input.strip()
+                sede_lower = sede_input.lower()
+                sedes_lower = [s.lower() for s in sedes]
+                if sede_lower in sedes_lower:
+                    sede = sedes[sedes_lower.index(sede_lower)]
+                else:
+                    sede = create_new_sede(sede_input)
+                    if not sede:
+                        return
 
-            if not selected_interfaces:
-                print("No se seleccionaron interfaces válidas.")
-                continue
-
-            # Generar la configuración para las interfaces seleccionadas
-            config_content = generate_selected_interfaces_config(
-                agent_ip,
-                sede,
-                selected_interfaces,
-                snmp_version
-            )
-
-            # Nombre del archivo .conf
-            default_filename = f"config_{agent_ip}.conf"
-            config_filename = input(f"Introduce el nombre para el archivo de configuración (sugerencia: {default_filename}): ").strip()
-            config_filename = config_filename if config_filename else default_filename
-            config_path = os.path.join(TELEGRAF_DIR, sede, config_filename)
-
-        else:
-            print("Opción inválida. Operación cancelada para este agente.")
+        # Solicitar las IPs a introducir
+        ips_input = input("Introduce las direcciones IP de los agentes SNMP, separadas por comas: ").strip()
+        agent_ips = [ip.strip() for ip in ips_input.split(',') if ip.strip()]
+        if not agent_ips:
+            print("No se introdujeron direcciones IP válidas.")
             continue
 
-        # Verificar si el archivo ya existe
-        if os.path.exists(config_path):
-            if not prompt_yes_no(f"El archivo {config_filename} ya existe en la sede {sede}. ¿Deseas sobrescribirlo? (s/n): "):
-                print("Operación cancelada para este agente.")
+        for agent_ip in agent_ips:
+            if not is_valid_ip(agent_ip):
+                print(f"IP inválida: {agent_ip}. Se omitirá esta dirección.")
                 continue
 
-        # Crear el archivo de configuración
-        try:
-            with open(config_path, 'w') as config_file:
-                config_file.write(config_content)
-            print(f"Agente añadido y archivo guardado en {config_path}")
-        except IOError as e:
-            print(f"Error al escribir el archivo de configuración: {e}")
+            snmp_version = 2
+            mp_model = 1  # Correspondiente a SNMPv2c
+
+            community = 'GestionGrp'  # Comunidad SNMP por defecto
+
+            # Consultamos SNMP para obtener el hostname
+            oid_hostname = '1.3.6.1.2.1.1.5.0'  # OID numérico para el hostname
+            hostname = snmp_get(agent_ip, community, oid_hostname, mp_model)
+
+            if hostname:
+                print(f"Hostname capturado por SNMP: {hostname}")
+            else:
+                print("No se pudo capturar el hostname por SNMP.")
+                hostname = None
+
+            # Sugerencia para el `device_alias`
+            if hostname:
+                device_alias_input = input(f"Introduce el alias del dispositivo (sugerencia: {hostname}): ").strip()
+            else:
+                device_alias_input = input("Introduce el alias del dispositivo (por ejemplo, 'Router Oficina Central'): ").strip()
+
+            device_alias = device_alias_input if device_alias_input else (hostname if hostname else "UNKNOWN")
+
+            # Construir device_alias_with_ip para las plantillas
+            device_alias_with_ip = f"{device_alias}: {agent_ip}"
+
+            # Selección de las interfaces a monitorizar
+            while True:
+                print("\n¿Deseas monitorizar todas las interfaces o elegir las interfaces a monitorizar?")
+                print("1. Monitorizar todas las interfaces (recomendado si no estás seguro)")
+                print("2. Elegir las interfaces a monitorizar (para monitorear interfaces específicas)")
+                choice = input("Elige una opción (1 o 2): ").strip()
+
+                if choice == '1':
+                    # Generar configuración para monitorizar todas las interfaces
+                    config_content = TEMPLATE_ALL_INTERFACES.format(
+                        agent_ip=agent_ip,
+                        device_alias_with_ip=device_alias_with_ip,
+                        table_name=sede,
+                        snmp_version=snmp_version
+                    )
+                    break
+
+                elif choice == '2':
+                    # Obtener la lista de interfaces usando OIDs numéricos
+                    interfaces = get_interfaces(agent_ip, community, mp_model)
+                    if not interfaces:
+                        print("No se pudieron obtener las interfaces del agente SNMP.")
+                        continue
+
+                    # Mostrar las interfaces al usuario
+                    print("\nInterfaces disponibles:")
+                    for i, (if_index, if_descr) in enumerate(interfaces):
+                        print(f"{i+1}. {if_descr} (Index: {if_index})")
+
+                    # Pedir al usuario que seleccione las interfaces
+                    while True:
+                        selected_indices_input = input("Ingresa los números de las interfaces a monitorizar, separados por espacios: ").strip()
+                        selected_indices = [s.strip() for s in selected_indices_input.split() if s.strip().isdigit()]
+                        selected_indices = [int(s) for s in selected_indices]
+
+                        selected_interfaces = []
+                        for idx in selected_indices:
+                            if 1 <= idx <= len(interfaces):
+                                if_index, if_descr = interfaces[idx -1]
+                                # Solicitar device_alias para cada interfaz
+                                device_alias_interface = input(f"Introduce el alias para la interfaz '{if_descr}' (o deja en blanco para usar '{device_alias}'): ").strip()
+                                device_alias_final = device_alias_interface if device_alias_interface else device_alias
+                                selected_interfaces.append((if_index, if_descr, device_alias_final))
+                            else:
+                                print(f"Número de interfaz inválido: {idx}")
+                        if selected_interfaces:
+                            break
+                        else:
+                            print("No se seleccionaron interfaces válidas. Por favor, inténtalo de nuevo.")
+
+                    # Generar la configuración para las interfaces seleccionadas
+                    config_content = generate_selected_interfaces_config(
+                        agent_ip,
+                        sede,
+                        selected_interfaces,
+                        snmp_version
+                    )
+                    break
+
+                else:
+                    print("Opción inválida. Por favor, elige 1 o 2.")
+
+            # Rutas de los archivos de configuración
+            config_filename = f"config_{agent_ip}.conf"
+            config_path = os.path.join(TELEGRAF_DIR, sede, config_filename)
+
+            icmp_config_filename = f"icmp_{agent_ip}.conf"
+            icmp_config_path = os.path.join(TELEGRAF_DIR, sede, icmp_config_filename)
+
+            # Generar configuración para monitoreo ICMP
+            icmp_config_content = TEMPLATE_ICMP.format(
+                agent_ip=agent_ip,
+                table_name=sede,
+                device_alias_with_ip=device_alias_with_ip
+            )
+
+            # Verificar si los archivos ya existen
+            existing_files = []
+            if os.path.exists(config_path):
+                existing_files.append(config_path)
+            if os.path.exists(icmp_config_path):
+                existing_files.append(icmp_config_path)
+
+            if existing_files:
+                print("\nLos siguientes archivos ya existen y serán sobrescritos:")
+                for f in existing_files:
+                    print(f"- {f}")
+                if not prompt_yes_no("¿Deseas continuar? (s/n): "):
+                    print("Operación cancelada para este agente.")
+                    continue
+
+            # Crear o sobrescribir los archivos de configuración
+            try:
+                with open(config_path, 'w') as config_file:
+                    config_file.write(config_content)
+                print(f"Archivo de configuración SNMP guardado en {config_path}")
+            except IOError as e:
+                print(f"Error al escribir el archivo de configuración SNMP: {e}")
+                continue
+
+            try:
+                with open(icmp_config_path, 'w') as config_file:
+                    config_file.write(icmp_config_content)
+                print(f"Archivo de configuración ICMP guardado en {icmp_config_path}")
+            except IOError as e:
+                print(f"Error al escribir el archivo de configuración ICMP: {e}")
+                continue
+
+        # Recargar Telegraf para aplicar los cambios
+        reload_telegraf()
+        print("Agentes añadidos exitosamente.")
+        break
 
 def create_new_sede(sede_name=None):
     """Función para crear una nueva sede."""
@@ -340,85 +448,89 @@ def get_interfaces(agent_ip, community, mp_model):
             interfaces.append((str(if_index), value))
     return interfaces
 
-def generate_selected_interfaces_config(agent_ip, table_name, selected_interfaces, snmp_version):
-    """Genera la configuración de Telegraf para las interfaces seleccionadas."""
-    config = ""
-
-    for if_index, if_descr, device_alias in selected_interfaces:
-        config += f"""# Configuración SNMP para la interfaz {if_descr} (índice {if_index})
-[[inputs.snmp]]
-  name = "{table_name}"
-  agents = ['{agent_ip}']
-  version = 2
-  community = "GestionGrp"
-  interval = "30s"
-  precision = "30s"
-  timeout = "5s"
-  retries = 1
-  agent_host_tag = "source"
-
-  [inputs.snmp.tags]
-    ifDescr = "{if_descr}"
-    device_alias = "{device_alias}"
-
-  [[inputs.snmp.field]]
-    name = "hostname"
-    oid = "RFC1213-MIB::sysName.0"
-    is_tag = true
-
-  [[inputs.snmp.field]]
-    name = "ifHCInOctets"
-    oid = "IF-MIB::ifHCInOctets.{if_index}"
-
-  [[inputs.snmp.field]]
-    name = "ifHCOutOctets"
-    oid = "IF-MIB::ifHCOutOctets.{if_index}"
-
-"""
-
-    return config
-
 def delete_agent():
     """Función para eliminar un agente buscando por IP en archivos con nombre específico."""
-    sedes = list_sedes()
-    agent_ip = input("Introduce la IP del agente a eliminar: ").strip()
+    while True:
+        sedes = list_sedes()
+        if not sedes:
+            print("No hay sedes disponibles.")
+            return
 
-    if not is_valid_ip(agent_ip):
-        print("IP inválida. Por favor, introduce una dirección IP válida.")
-        return
+        print("\nSelecciona la sede donde se encuentra el agente o escribe su nombre:")
+        for i, sede in enumerate(sedes):
+            print(f"{i + 1}. {sede}")
 
-    config_filename = f"config_{agent_ip}.conf"
-    archivos_eliminados = []
+        sede_input = input("Elige un número o escribe el nombre de la sede: ").strip()
 
-    # Recorrer todas las sedes y buscar el archivo de configuración
-    for sede in sedes:
-        config_path = os.path.join(TELEGRAF_DIR, sede, config_filename)
-        if os.path.exists(config_path):
-            # Leer el alias del dispositivo desde el archivo de configuración
-            try:
-                with open(config_path, 'r') as config_file:
-                    content = config_file.read()
-                match = re.search(r'device_alias\s*=\s*"(.*?)"', content)
-                device_alias = match.group(1) if match else "UNKNOWN"
-            except IOError as e:
-                print(f"Error al leer el archivo {config_path}: {e}")
+        if sede_input.isdigit():
+            index = int(sede_input) - 1
+            if 0 <= index < len(sedes):
+                sede = sedes[index]
+            else:
+                print("Opción inválida.")
+                continue
+        else:
+            sede_input = sede_input.strip()
+            sede_lower = sede_input.lower()
+            sedes_lower = [s.lower() for s in sedes]
+            if sede_lower in sedes_lower:
+                sede = sedes[sedes_lower.index(sede_lower)]
+            else:
+                print("La sede especificada no existe.")
                 continue
 
-            # Confirmar con el usuario antes de eliminar
-            if prompt_yes_no(f"¿Estás seguro de eliminar el agente '{device_alias}' con IP {agent_ip} y archivo {config_path}? (s/n): "):
-                try:
-                    os.remove(config_path)
-                    archivos_eliminados.append(config_path)
-                    print(f"Archivo eliminado: {config_path}")
-                except IOError as e:
-                    print(f"Error al eliminar el archivo {config_path}: {e}")
-            else:
-                print(f"Eliminación del archivo {config_path} cancelada.")
+        agent_ip = input("Introduce la IP del agente a eliminar: ").strip()
 
-    if not archivos_eliminados:
-        print(f"No se encontró ningún archivo de configuración para la IP {agent_ip} en ninguna sede.")
-    else:
-        print(f"Agente con IP {agent_ip} eliminado correctamente.")
+        if not is_valid_ip(agent_ip):
+            print("IP inválida. Por favor, introduce una dirección IP válida.")
+            continue
+
+        config_filenames = [
+            f"config_{agent_ip}.conf",
+            f"icmp_{agent_ip}.conf"
+        ]
+        archivos_eliminados = []
+
+        # Buscar y eliminar los archivos de configuración en la sede especificada
+        for config_filename in config_filenames:
+            config_path = os.path.join(TELEGRAF_DIR, sede, config_filename)
+            if os.path.exists(config_path):
+                # Leer el alias del dispositivo desde el archivo de configuración SNMP
+                if config_filename.startswith("config_"):
+                    try:
+                        with open(config_path, 'r') as config_file:
+                            content = config_file.read()
+                        match = re.search(r'device_alias\s*=\s*"(.*?)"', content)
+                        device_alias = match.group(1) if match else "UNKNOWN"
+                    except IOError as e:
+                        print(f"Error al leer el archivo {config_path}: {e}")
+                        continue
+                    confirm_message = f"¿Estás seguro de eliminar el agente '{device_alias}' con IP {agent_ip} y archivo {config_path}? (s/n): "
+                else:
+                    # Para archivos ICMP, no hay device_alias
+                    confirm_message = f"¿Estás seguro de eliminar el archivo de configuración ICMP para la IP {agent_ip} en {config_path}? (s/n): "
+
+                # Confirmar con el usuario antes de eliminar
+                if prompt_yes_no(confirm_message):
+                    try:
+                        os.remove(config_path)
+                        archivos_eliminados.append(config_path)
+                        print(f"Archivo eliminado: {config_path}")
+                    except IOError as e:
+                        print(f"Error al eliminar el archivo {config_path}: {e}")
+                else:
+                    print(f"Eliminación del archivo {config_path} cancelada.")
+            else:
+                print(f"No se encontró el archivo {config_path}.")
+
+        if archivos_eliminados:
+            # Recargar Telegraf para aplicar los cambios
+            reload_telegraf()
+            print(f"Agente con IP {agent_ip} eliminado correctamente.")
+        else:
+            print(f"No se encontró ningún archivo de configuración para la IP {agent_ip} en la sede {sede}.")
+
+        break
 
 def main():
     """Función principal del script."""
@@ -436,7 +548,7 @@ def main():
             delete_agent()
         elif choice == '3':
             print("Saliendo...")
-            break
+            sys.exit(0)
         else:
             print("Opción inválida, por favor elige 1, 2 o 3.")
 
