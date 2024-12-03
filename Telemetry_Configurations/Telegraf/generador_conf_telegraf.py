@@ -189,7 +189,7 @@ def generate_selected_interfaces_config(agent_ip, table_name, selected_interface
 
   [inputs.snmp.tags]
     ifDescr = "{if_descr}"
-    device_alias = "{device_alias_with_ip}"
+    snmp_device_alias = "{device_alias_with_ip}"
 
   [[inputs.snmp.field]]
     name = "hostname"
@@ -495,7 +495,7 @@ def delete_agent():
             continue
 
         config_filenames = [
-            f"snmp_{agent_ip}.conf",
+            f"config_{agent_ip}.conf",
             f"icmp_{agent_ip}.conf"
         ]
         archivos_eliminados = []
