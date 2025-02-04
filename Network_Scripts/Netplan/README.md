@@ -1,2 +1,2 @@
-**Archivo netplan_config_shell.py**
+**Archivo netplan-wizard.py**
 - Falla el chequeo de conectividad, da falsos positivos siempre.
