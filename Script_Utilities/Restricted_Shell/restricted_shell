@@ -1,81 +1,152 @@
 #!/bin/bash
+clear
+trap '' INT
 
-# Bloquear señales relevantes
-trap '' INT QUIT TSTP
+# ---------------------- Funciones auxiliares ----------------------------
 
-# Funciones
-function validate_input() {
-    local input="$1"
-    local pattern="^[a-zA-Z0-9._-]+$"
-    if [[ ! $input =~ $pattern ]]; then
-        echo "Caracteres no válidos en la entrada"
-        return 1
-    fi
-    return 0
+ip2int() {
+    local IFS=.
+    read -r a b c d <<< "$1"
+    echo $(( (a << 24) + (b << 16) + (c << 8) + d ))
 }
 
-function log_action() {
+ip_in_cidr() {
     local ip="$1"
-    local cmd="$2"
-    echo "[ $(date +"%d/%m/%y %r")] Host: $ip  --  $cmd" >> /var/log/restricted_shell.log
+    local cidr="$2"
+    local base bits ip_int base_int mask
+    base=${cidr%/*}
+    bits=${cidr#*/}
+    ip_int=$(ip2int "$ip")
+    base_int=$(ip2int "$base")
+    mask=$(( 0xFFFFFFFF << (32 - bits) & 0xFFFFFFFF ))
+    (( (ip_int & mask) == (base_int & mask) ))
 }
 
-function sanitize_command() {
-    echo "$1" | sed -e 's/&&.*//g' -e 's/||.*//g' -e 's/\;.*//g' -e 's/\|.*//g' -e 's/>.*//g' -e 's/<.*//g'
+get_route_for_ip() {
+    local ip="$1"
+    ip route get "$ip" 2>/dev/null | awk '{print $3}' | head -n 1
 }
 
-# Variables
-IP=$(echo $SSH_CONNECTION | awk '{print $1, $2}')
-allowed_commands=("ping" "tracepath" "plink" "ssh" "exit")
-max_args=3
-timeout_duration=10s
+print_banner() {
+    echo "=============== Comandos Permitidos ==============="
+    for cmd in "${allowed_commands[@]}"; do
+       printf "  - %s\n" "$cmd"
+    done
+    echo "==================================================="
+}
 
-# Limpiar la pantalla
-clear && clear
+print_help() {
+    echo "================= Restricted Shell ================="
+    echo "Este shell permite ejecutar los siguientes comandos:"
+    echo "  ping       - Enviar paquetes ICMP."
+    echo "  ssh        - Acceder a otros servidores vía SSH."
+    echo "  plink      - Herramienta similar a ssh."
+    echo "  telnet     - Conectar a servicios mediante Telnet."
+    echo "  tracepath  - Trazar ruta de red a un destino."
+    echo "  mtr        - Combinación de ping y traceroute."
+    echo "  exit       - Salir del shell."
+    echo "  help       - Mostrar esta ayuda."
+    echo "------------------------------------------------------"
+    echo "Las restricciones de acceso se aplican según políticas internas."
+    echo "------------------------------------------------------"
+}
 
-echo "Comandos Permitidos: ${allowed_commands[*]}"
+# ---------------------- Configuración Inicial ----------------------------
+
+if [[ -n "$SSH_CONNECTION" ]]; then
+    IP=$(awk '{print $1, $2}' <<< "$SSH_CONNECTION")
+else
+    IP="localhost"
+fi
+
+allowed_commands=(ping ssh plink telnet tracepath mtr exit help)
+
+# Redes que NO pueden ser accedidas.
+restricted_networks=()
+
+# Lista de rutas de salida permitidas (si la ruta de salida no está aquí, se bloquea)
+allowed_routes=("vlan199" "192.168.99.1" "vlan2")
+
+print_banner
+
+# ---------------------- Bucle Principal ----------------------------------
 
 while true; do
-    read -e -p "Restricted: $ " -a cmd_parts
-    while [[ -z ${cmd_parts[0]} ]]; do
-        read -e -p "Restricted: $ " -a cmd_parts
+    read -r -e -p "Restricted: $ " user_command
+    [[ -z "$user_command" ]] && continue
+
+    echo "[ $(date +"%d/%m/%y %T") ] Host: $IP -- $user_command" >> /var/log/restricted_shell.log
+
+    # Separa la entrada en tokens.
+    read -r -a tokens <<< "$user_command"
+    command_name="${tokens[0]}"
+
+    # Verifica que el comando esté en la lista permitida.
+    valid=false
+    for allowed in "${allowed_commands[@]}"; do
+        if [[ "$command_name" == "$allowed" ]]; then
+            valid=true
+            break
+        fi
     done
 
-    first_word="${cmd_parts[0]}"
-    cmd="${cmd_parts[*]}"
-
-    # Validar entrada
-    if ! validate_input "$first_word"; then
+    if ! $valid; then
+        echo "Comando \"$user_command\" no permitido."
+        print_banner
         continue
     fi
 
-    # Sanitizar el comando
-    sanitized_cmd=$(sanitize_command "$cmd")
-    
-    # Registrar la acción
-    log_action "$IP" "$cmd"
+    if [[ "$command_name" == "help" ]]; then
+        print_help
+        continue
+    fi
 
-    if [[ " ${allowed_commands[*]} " =~ " ${first_word} " ]]; then
-        if [[ "${first_word}" == "exit" ]]; then
-            exit 0
-        else
-            # Limitar la cantidad de argumentos
-            if [[ ${#cmd_parts[@]} -gt $max_args ]]; then
-                echo "Demasiados argumentos para el comando \"$first_word\". Se permiten hasta $((max_args-1)) argumentos."
-                continue
-            fi
-
-            # Ejecutar el comando de manera segura
-            timeout $timeout_duration "${cmd_parts[@]}"
-            exit_status=$?
-            
-            if [ $exit_status -eq 124 ]; then
-                echo "El comando se interrumpió después de $timeout_duration"
-            elif [ $exit_status -ne 0 ]; then
-                echo "El comando falló con código de salida $exit_status"
+    disallowed=false
+    # Verifica cada argumento en busca de direcciones IP.
+    for token in "${tokens[@]:1}"; do
+        ip_candidate="$token"
+        # Si el token tiene formato usuario@IP, extrae la IP.
+        if [[ "$token" == *"@"* ]]; then
+            ip_candidate="${token#*@}"
+        fi
+        # Si el token tiene formato IP:puerto, extrae la IP.
+        if [[ "$ip_candidate" == *":"* ]]; then
+            ip_candidate="${ip_candidate%%:*}"
+        fi
+        if [[ "$ip_candidate" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            # Comprueba si la IP pertenece a alguna red restringida.
+            for rnet in "${restricted_networks[@]}"; do
+                if ip_in_cidr "$ip_candidate" "$rnet"; then
+                    echo "Acceso a destino $ip_candidate no permitido."
+                    disallowed=true
+                    break 2
+                fi
+            done
+            # Obtiene la ruta de salida para la IP.
+            route=$(get_route_for_ip "$ip_candidate")
+            route_allowed=false
+            for aroute in "${allowed_routes[@]}"; do
+                if [[ "$route" == "$aroute" ]]; then
+                    route_allowed=true
+                    break
+                fi
+            done
+            if ! $route_allowed; then
+                echo "No se permite salir por la ruta $route."
+                disallowed=true
+                break
             fi
         fi
-    else
-        echo "Comando \"${sanitized_cmd}\" no permitido. Comandos Permitidos: ${allowed_commands[*]}"
+    done
+
+    if $disallowed; then
+        continue
     fi
+
+    if [[ "$command_name" == "exit" ]]; then
+        exit 0
+    fi
+
+    # Ejecuta el comando de forma segura.
+    "${tokens[@]}"
 done
