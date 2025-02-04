@@ -1,5 +1,5 @@
 #!/bin/bash
-# Navaja suiza definitiva para ampliar discos en Linux de forma 100% automática
+# Script para ampliar discos en Linux de forma automática
 # Soporta particiones estándar y LVM, detecta el disco extendido virtualmente,
 # redimensiona la partición y expande el sistema de ficheros.
 #
