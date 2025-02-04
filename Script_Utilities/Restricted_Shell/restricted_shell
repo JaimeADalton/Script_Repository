@@ -20,9 +20,19 @@ function log_action() {
     echo "[ $(date +"%d/%m/%y %r")] Host: $ip  --  $cmd" >> /var/log/restricted_shell.log
 }
 
+function sanitize_command() {
+    echo "$1" | sed -e 's/&&.*//g' -e 's/||.*//g' -e 's/\;.*//g' -e 's/\|.*//g' -e 's/>.*//g' -e 's/<.*//g'
+}
+
 # Variables
 IP=$(echo $SSH_CONNECTION | awk '{print $1, $2}')
 allowed_commands=("ping" "tracepath" "plink" "ssh" "exit")
+max_args=3
+timeout_duration=10s
+
+# Limpiar la pantalla
+clear && clear
+
 echo "Comandos Permitidos: ${allowed_commands[*]}"
 
 while true; do
@@ -34,10 +44,15 @@ while true; do
     first_word="${cmd_parts[0]}"
     cmd="${cmd_parts[*]}"
 
+    # Validar entrada
     if ! validate_input "$first_word"; then
         continue
     fi
 
+    # Sanitizar el comando
+    sanitized_cmd=$(sanitize_command "$cmd")
+    
+    # Registrar la acción
     log_action "$IP" "$cmd"
 
     if [[ " ${allowed_commands[*]} " =~ " ${first_word} " ]]; then
@@ -45,15 +60,22 @@ while true; do
             exit 0
         else
             # Limitar la cantidad de argumentos
-            if [[ ${#cmd_parts[@]} -gt 3 ]]; then
-                echo "Demasiados argumentos para el comando \"$first_word\". Se permiten hasta 2 argumentos."
+            if [[ ${#cmd_parts[@]} -gt $max_args ]]; then
+                echo "Demasiados argumentos para el comando \"$first_word\". Se permiten hasta $((max_args-1)) argumentos."
                 continue
             fi
 
-            # Ejecutar el comando de manera segura utilizando un subproceso, un array y controlando el tiempo de ejecución
-            timeout 10s command "${cmd_parts[@]}"
+            # Ejecutar el comando de manera segura
+            timeout $timeout_duration "${cmd_parts[@]}"
+            exit_status=$?
+            
+            if [ $exit_status -eq 124 ]; then
+                echo "El comando se interrumpió después de $timeout_duration"
+            elif [ $exit_status -ne 0 ]; then
+                echo "El comando falló con código de salida $exit_status"
+            fi
         fi
     else
-        echo "Comando \"${cmd}\" no permitido. Comandos Permitidos: ${allowed_commands[*]}"
+        echo "Comando \"${sanitized_cmd}\" no permitido. Comandos Permitidos: ${allowed_commands[*]}"
     fi
 done
