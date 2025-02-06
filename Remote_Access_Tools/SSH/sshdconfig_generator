@@ -1,300 +1,207 @@
 #!/bin/bash
+# ---------------------------------------------------------------------------
+# Generador interactivo de archivo sshd_config
+#
+# Este script permite configurar de forma interactiva el servicio SSH.
+# - Se realizan respaldos del archivo original.
+# - Se solicitan los valores de cada parámetro (mostrando descripción, opciones
+#   y valores por defecto).
+# - Se valida la entrada para evitar errores.
+#
+# Para aplicar la configuración, una vez revisado, copie el archivo generado
+# sobre /etc/ssh/sshd_config y reinicie el servicio SSH.
+#
+# Ejemplo:
+#   cp sshd_config.generated /etc/ssh/sshd_config && systemctl restart sshd
+# ---------------------------------------------------------------------------
 
-# Verifica que el usuario tenga permisos de superusuario
+# El script debe ejecutarse como superusuario.
 if [[ $EUID -ne 0 ]]; then
-   echo "Este script debe ejecutarse con permisos de superusuario." 
-   exit 1
+  echo "Este script debe ejecutarse con permisos de superusuario." >&2
+  exit 1
 fi
 
-# Archivo de configuración
-config_file="/etc/ssh/sshd_config"
+# Archivo de configuración actual y nombre del archivo generado
+orig_config="/etc/ssh/sshd_config"
+generated_file="sshd_config.generated"
 
-bak_num_file=$(ls -lAh /etc/ssh/sshd_config.bak* 2> /dev/null  | grep -v '^d' | wc -l)
+echo "Bienvenido al generador interactivo de configuración SSH (sshd_config)."
+echo "Este script le ayudará a crear un archivo de configuración adecuado."
+echo "-----------------------------------------------------------------------"
 
-if [[ bak_num_file > 0 ]] && [[ -f /etc/ssh/sshd_config.bak ]]; then
-     # Create a backup of the original SSH server configuration file
-     cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$((bak_num_file))
-else
-     cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+# Realiza backup del archivo original, si existe.
+if [[ -f "$orig_config" ]]; then
+  backup_dest="/etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)"
+  echo "Realizando backup de $orig_config a $backup_dest"
+  cp "$orig_config" "$backup_dest"
 fi
 
-declare -A ssh_params
+# Declaración de parámetros
+# Cada elemento tiene el formato:
+#   Parametro|Descripción|ValorPorDefecto|Tipo (choice|number|text)|Opciones (si choice, separadas por coma)
+params=(
+  "AcceptEnv|Permite que se acepten variables de entorno enviadas por el cliente. (Riesgo: variables maliciosas)|no|choice|yes,no"
+  "AddressFamily|Define la familia de direcciones (inet, inet6 o any)|any|choice|inet,inet6,any"
+  "AllowAgentForwarding|Permite el reenvío del agente SSH (útil para autenticación sin claves locales)|no|choice|yes,no"
+  "AllowGroups|Restringe el acceso SSH a ciertos grupos (espacio separado, sin comas)|<vacío>|text|"
+  "AllowTcpForwarding|Permite el reenvío de puertos TCP|no|choice|yes,no"
+  "AllowUsers|Restringe el acceso SSH a ciertos usuarios (espacio separado)|<vacío>|text|"
+  "AuthorizedKeysFile|Ruta del archivo de claves autorizadas|.ssh/authorized_keys|text|"
+  "Banner|Archivo con mensaje de advertencia previo al login|<vacío>|text|"
+  "ChallengeResponseAuthentication|Usa autenticación de desafío/respuesta|yes|choice|yes,no"
+  "ChrootDirectory|Directorio para limitar el acceso (chroot)|<vacío>|text|"
+  "Ciphers|Lista de cifrados permitidos (separe con espacios)|aes128-ctr aes192-ctr aes256-ctr|text|"
+  "ClientAliveCountMax|Número máximo de mensajes keep-alive sin respuesta|3|number|"
+  "ClientAliveInterval|Intervalo (en segundos) entre mensajes keep-alive|0|number|"
+  "Compression|Habilita la compresión de datos|delayed|choice|yes,no,delayed"
+  "DenyGroups|Niega el acceso SSH a determinados grupos (espacio separado)|<vacío>|text|"
+  "DenyUsers|Niega el acceso SSH a determinados usuarios (espacio separado)|<vacío>|text|"
+  "ForceCommand|Comando a ejecutar al iniciar sesión (si se requiere limitar la sesión)|<vacío>|text|"
+  "GatewayPorts|Permite que hosts remotos se conecten a puertos reenviados|no|choice|yes,no"
+  "GSSAPIAuthentication|Habilita autenticación GSSAPI (Kerberos, etc.)|no|choice|yes,no"
+  "GSSAPICleanupCredentials|Elimina las credenciales GSSAPI al finalizar la sesión|yes|choice|yes,no"
+  "HostbasedAuthentication|Habilita autenticación basada en la clave del host|no|choice|yes,no"
+  "HostbasedUsesNameFromPacketOnly|Usa solo el nombre del paquete para autenticación basada en host|no|choice|yes,no"
+  "HostKey|Ruta de la clave del host|/etc/ssh/ssh_host_rsa_key|text|"
+  "IgnoreRhosts|Ignora el archivo .rhosts del usuario|yes|choice|yes,no"
+  "IgnoreUserKnownHosts|Ignora el archivo known_hosts del usuario|no|choice|yes,no"
+  "KerberosAuthentication|Habilita autenticación Kerberos|no|choice|yes,no"
+  "KerberosGetAFSToken|Obtiene un token AFS durante autenticación Kerberos|no|choice|yes,no"
+  "KerberosOrLocalPasswd|Permite contraseña local si Kerberos falla|yes|choice|yes,no"
+  "KerberosTicketCleanup|Elimina tickets Kerberos al finalizar la sesión|yes|choice|yes,no"
+  "KeyRegenerationInterval|Intervalo para regenerar la clave del servidor (p.ej. 1h)|1h|text|"
+  "ListenAddress|Dirección IP en la que escucha SSH|0.0.0.0|text|"
+  "LoginGraceTime|Tiempo permitido para autenticarse (p.ej. 2m)|2m|text|"
+  "LogLevel|Nivel de log (VERBOSE, INFO, etc.)|INFO|choice|QUIET,FATAL,ERROR,INFO,VERBOSE,DEBUG,DEBUG1,DEBUG2,DEBUG3"
+  "MACs|Códigos de autenticación permitidos (separe con espacios)|hmac-sha2-256 hmac-sha2-512|text|"
+  "Match|Condicional para aplicar configuraciones a ciertos usuarios/hosts|<vacío>|text|"
+  "MaxAuthTries|Número máximo de intentos de autenticación|6|number|"
+  "MaxSessions|Número máximo de sesiones concurrentes|10|number|"
+  "MaxStartups|Control de tasa de conexiones entrantes|4|number|"
+  "PasswordAuthentication|Permite autenticación con contraseña|yes|choice|yes,no"
+  "PermitEmptyPasswords|Permite iniciar sesión sin contraseña (no recomendado)|no|choice|yes,no"
+  "PermitOpen|Lista de puertos/host:puerto permitidos para reenvío (espacio separado)|localhost:80|text|"
+  "PermitRootLogin|Permite login de root (opciones: yes, no, prohibit-password, forced-commands-only)|no|choice|yes,no,prohibit-password,forced-commands-only"
+  "PermitTunnel|Permite la creación de túneles SSH|no|choice|yes,no"
+  "PermitUserEnvironment|Permite que el usuario configure variables de entorno propias|no|choice|yes,no"
+  "PidFile|Ubicación del archivo PID para SSH|/run/sshd.pid|text|"
+  "Port|Puerto en el que escucha SSH|22|number|"
+  "PrintLastLog|Muestra el último login del usuario|yes|choice|yes,no"
+  "PrintMotd|Muestra el mensaje del día (MOTD)|yes|choice|yes,no"
+  "Protocol|Versiones del protocolo SSH soportadas (1,2)|2|choice|1,2"
+  "PubkeyAuthentication|Habilita autenticación por clave pública|yes|choice|yes,no"
+  "RhostsRSAAuthentication|Habilita autenticación RhostsRSA|no|choice|yes,no"
+  "RSAAuthentication|Habilita autenticación RSA|yes|choice|yes,no"
+  "ServerKeyBits|Tamaño (en bits) de la clave del host|2048|number|"
+  "StrictModes|Verifica permisos y propiedad de los archivos de configuración|yes|choice|yes,no"
+  "Subsystem|Define un subsistema (p.ej. sftp)|sftp /usr/lib/openssh/sftp-server|text|"
+  "SyslogFacility|Facilidad de syslog para los logs de SSH|AUTH|choice|DAEMON,USER,AUTH,AUTHPRIV,LOCAL0,LOCAL1,LOCAL2,LOCAL3,LOCAL4,LOCAL5,LOCAL6,LOCAL7"
+  "TCPKeepAlive|Habilita el mecanismo TCP keep-alive|yes|choice|yes,no"
+  "UseDNS|Realiza resolución DNS de direcciones IP en logs|no|choice|yes,no"
+  "UseLogin|Utiliza el wrapper login(1) para la autenticación|no|choice|yes,no"
+  "UsePAM|Utiliza PAM para autenticación|yes|choice|yes,no"
+  "UsePrivilegeSeparation|Separa privilegios para mayor seguridad (sandbox recomendado)|sandbox|choice|yes,no,sandbox"
+  "X11DisplayOffset|Offset para la pantalla X11|10|number|"
+  "X11Forwarding|Permite reenvío de X11 (para apps gráficas remotas)|no|choice|yes,no"
+  "X11UseLocalhost|Restringe el reenvío X11 a la máquina local|yes|choice|yes,no"
+  "XAuthLocation|Ruta del programa xauth|<vacío>|text|"
+  "KexAlgorithms|Lista de algoritmos para intercambio de claves (separe con espacios)|<vacío>|text|"
+  "AuthorizedKeysCommand|Comando para obtener claves autorizadas dinámicamente|<vacío>|text|"
+  "AuthorizedKeysCommandUser|Usuario que ejecuta AuthorizedKeysCommand|<vacío>|text|"
+)
 
-# add some key-value pairs with three related elements
-ssh_params["AcceptEnv"]="allow environment variables to be passed from the client to the server:,no"
-ssh_params["AddressFamily"]="Which address family/ies support (inet  inet6  any):,any"
-ssh_params["AllowAgentForwarding"]="allow SSH agent forwarding:,no"
-ssh_params["AllowGroups"]="restrict SSH access to specific groups of users:,"
-ssh_params["AllowTcpForwarding"]="allow TCP forwarding:,no"
-ssh_params["AllowUsers"]="restrict SSH access to specific users:,"
-ssh_params["AuthorizedKeysFile"]="specify the file location for authorized public keys:,.ssh/authorized_keys"
-ssh_params["Banner"]="display a banner message before login:,"
-ssh_params["ChallengeResponseAuthentication"]="use challenge-response authentication:,yes"
-ssh_params["ChrootDirectory"]="chroot SSH user to a specific directory:,"
-ssh_params["Ciphers"]="specify which ciphers to use for encryption:,aes128-ctr aes192-ctr aes256-ctr"
-ssh_params["ClientAliveCountMax"]="set the maximum number of client alive messages that can be sent without a response:,3"
-ssh_params["ClientAliveInterval"]="set the time interval in seconds between sending client alive messages:,0"
-ssh_params["Compression"]="enable compression of SSH traffic:,delayed"
-ssh_params["DenyGroups"]="deny SSH access to specific groups of users:,"
-ssh_params["DenyUsers"]="deny SSH access to specific users:,"
-ssh_params["ForceCommand"]="execute a specific command when a user logs in via SSH:,"
-ssh_params["GatewayPorts"]="allow remote hosts to connect to local forwarded ports:,no"
-ssh_params["GSSAPIAuthentication"]="enable GSSAPI authentication for SSH:,no"
-ssh_params["GSSAPICleanupCredentials"]="automatically clean up GSSAPI credentials after a session ends:,yes"
-ssh_params["HostbasedAuthentication"]="allow authentication based on the client host's key:,no"
-ssh_params["HostbasedUsesNameFromPacketOnly"]="restrict host-based authentication to the name provided by the client:,no"
-ssh_params["HostKey"]="specify the host keys for your SSH server:,/etc/ssh/ssh_host_rsa_key"
-ssh_params["IgnoreRhosts"]="ignore the user's .rhosts file for RhostsRSAAuthentication:,yes"
-ssh_params["IgnoreUserKnownHosts"]="ignore the user's known hosts file:,no"
-ssh_params["KerberosAuthentication"]="enable Kerberos authentication for SSH:,no"
-ssh_params["KerberosGetAFSToken"]="obtain an AFS token during Kerberos authentication:,no"
-ssh_params["KerberosOrLocalPasswd"]="allow local password authentication when Kerberos is unavailable:,yes"
-ssh_params["KerberosTicketCleanup"]="automatically destroy user's tickets and AFS tokens on logout:,yes"
-ssh_params["KeyRegenerationInterval"]="set the time interval in seconds after which the SSH server regenerates its server key:,1h"
-ssh_params["ListenAddress"]="specify the IP address or addresses on which to listen for SSH connections:,0.0.0.0"
-ssh_params["LoginGraceTime"]="set a time limit in seconds for users to enter valid credentials:,2m"
-ssh_params["LogLevel"]="set the logging level for SSH:,INFO"
-ssh_params["MACs"]="specify which message authentication codes (MACs) to use:,hmac-sha2-256 hmac-sha2-512"
-ssh_params["Match"]="apply specific settings to a subset of users or hosts:,"
-ssh_params["MaxAuthTries"]="set the maximum number of authentication attempts a user can make before being disconnected:,6"
-ssh_params["MaxSessions"]="set the maximum number of concurrent SSH sessions per network connection:,10"
-ssh_params["MaxStartups"]="set the maximum number of incoming SSH connections and rate limit for SSH sessions:,4"
-ssh_params["PasswordAuthentication"]="allow password authentication for SSH:,yes"
-ssh_params["PermitEmptyPasswords"]="allow users to log in without a password:,no"
-ssh_params["PermitOpen"]="specify which ports can be opened for remote port forwarding:,localhost:80"
-ssh_params["PermitRootLogin"]="allow root login over SSH:,no"
-ssh_params["PermitTunnel"]="allow SSH tunneling:,no"
-ssh_params["PermitUserEnvironment"]="allow users to set environment variables:,no"
-ssh_params["PidFile"]="specify the file in which to store the SSH server's process ID (PID):,/run/sshd.pid"
-ssh_params["Port"]="specify the port on which the SSH server listens for incoming connections:,22"
-ssh_params["PrintLastLog"]="print the date and time of the last login for each user:,yes"
-ssh_params["PrintMotd"]="print the message of the day (MOTD) upon login:,yes"
-ssh_params["Protocol"]="specify the SSH protocol version(s) to support:,2"
-ssh_params["PubkeyAuthentication"]="allow public key authentication for SSH:,yes"
-ssh_params["RhostsRSAAuthentication"]="allow RhostsRSA authentication for SSH:,no"
-ssh_params["RSAAuthentication"]="allow RSA authentication for SSH:,yes"
-ssh_params["ServerKeyBits"]="specify the size of the server's host key in bits:,2048"
-ssh_params["StrictModes"]="enforce strict mode for file permissions and ownership on the SSH server:,yes"
-ssh_params["Subsystem"]="specify a subsystem to be used as the default for SSH:,sftp /usr/lib/openssh/sftp-server"
-ssh_params["SyslogFacility"]="specify the facility code to be used when logging SSH events to syslog:,AUTH"
-ssh_params["TCPKeepAlive"]="enable TCP keep-alive messages for SSH connections:,yes"
-ssh_params["UseDNS"]="perform DNS resolution of IP addresses in SSH log messages:,no"
-ssh_params["UseLogin"]="enable the login(1) wrapper for SSH:,no"
-ssh_params["UsePAM"]="use Pluggable Authentication Modules (PAM) for SSH:,yes"
-ssh_params["UsePrivilegeSeparation"]="use privilege separation for SSH connections:,sandbox"
-ssh_params["X11DisplayOffset"]="specify the display offset for X11 forwarding:,10"
-ssh_params["X11Forwarding"]="allow X11 forwarding over SSH:,no"
-ssh_params["X11UseLocalhost"]="restrict X11 forwarding to the local machine only:,yes"
-ssh_params["XAuthLocation"]="specify the location of the xauth program for X11 forwarding:,"
+# Función para solicitar y validar el valor de un parámetro.
+prompt_parameter() {
+  local param="$1"
+  local description="$2"
+  local def="$3"
+  local type="$4"
+  local choices="$5"
+  local input
 
-# Define function to read a parameter value from user input
-read_value() {
-    local parameter="$1"
-    local default_value="$2"
-    local options
+  echo "-----------------------------------------------------------------------"
+  echo "Parámetro: $param"
+  echo "Descripción: $description"
+  if [[ "$def" == "<vacío>" ]]; then
+    echo "Valor por defecto: (vacío)"
+  else
+    echo "Valor por defecto: $def"
+  fi
 
-    case $parameter in
-        AddressFamily)
-            options=("inet" "inet6" "any")
-            ;;
-       X11Forwarding | TCPKeepAlive | X11UseLocalhost | AllowTcpForwarding | GatewayPorts | PermitEmptyPasswords | PermitRootLogin | PermitTunnel | PermitUserEnvironment | PrintLastLog | PrintMotd | UsePrivilegeSeparation | AcceptEnv | AllowAgentForwarding | ChallengeResponseAuthentication | GSSAPIAuthentication | GSSAPICleanupCredentials | HostbasedAuthentication | HostbasedUsesNameFromPacketOnly | IgnoreRhosts | KerberosAuthentication | KerberosGetAFSToken | KerberosOrLocalPasswd | KerberosTicketCleanup | PasswordAuthentication | PubkeyAuthentication | RhostsRSAAuthentication | RSAAuthentication | StrictModes | UseDNS | UseLogin | UsePAM | UsePrivilegeSeparation | X11Forwarding | X11UseLocalhost)
-            options=("yes" "no")
-            ;;
-        AllowGroups | DenyGroups)
-            read -rp "Enter a space-separated list of group names: " value
-            ;;
-        AllowUsers | DenyUsers)
-            read -rp "Enter a space-separated list of user names: " value
-            ;;
-        AuthorizedKeysFile)
-            read -rp "Enter a file path for authorized keys: " value
-            ;;
-        Banner)
-            read -rp "Enter a path for the banner file: " value
-            ;;
-        Compression)
-            options=("yes" "no" "delayed")
-            ;;
-        ChrootDirectory)
-            read -rp "Enter the directory to chroot: " value
-            ;;
-        Ciphers)
-            options=("3des-cbc" "aes128-cbc" "aes192-cbc" "aes256-cbc" "aes128-ctr" "aes192-ctr" "aes256-ctr" "aes128-gcm@openssh.com" "aes256-gcm@openssh.com" "arcfour" "arcfour128" "arcfour256" "blowfish-cbc" "cast128-cbc" "chacha20-poly1305@openssh.com")
-            ;;
-        ClientAliveCountMax)
-            read -rp "Enter a maximum number of client alive messages: " value
-            ;;
-        ClientAliveInterval)
-            read -rp "Enter a client alive message interval in seconds: " value
-            ;;
-        ForceCommand)
-            read -rp "Enter a command to be forced: " value
-            ;;
-        HostKey)
-            read -rp "Enter a file path for the host key: " value
-            ;;
-        KeyRegenerationInterval)
-            read -rp "Set the time interval: " value
-            ;;  
-        LogLevel)
-            options=("QUIET" "FATAL" "ERROR" "INFO" "VERBOSE" "DEBUG" "DEBUG1" "DEBUG2" "DEBUG3")
-            ;;
-        MACs)
-            options=("hmac-md5" "hmac-md5-96" "hmac-ripemd160" "hmac-sha1" "hmac-sha1-96" "hmac-sha2-256" "hmac-sha2-512" "umac-64@openssh.com" "umac-128@openssh.com" "hmac-md5-etm@openssh.com" "hmac-md5-96-etm@openssh.com" "hmac-ripemd160-etm@openssh.com" "hmac-sha1-etm@openssh.com" "hmac-sha1-96-etm@openssh.com" "hmac-sha2-256-etm@openssh.com" "hmac-sha2-512-etm@openssh.com" "umac-64-etm@openssh.com" "umac-128-etm@openssh.com")
-            ;;
-        Match)
-            read -rp "Enter a match pattern for conditionals: " value
-            ;;
-        MaxAuthTries)
-            read -rp "Enter a maximum number of authentication attempts: " value
-            ;;
-        MaxSessions)
-            read -rp "Enter a maximum number of open shell, login or subsystem sessions: " value
-            ;;
-        PasswordAuthentication)
-            options=("yes" "no")
-            ;;
-        PermitOpen)
-            read -rp "Enter a space-separated list of ports and/or host:port pairs: " value
-            ;;
-        PidFile)
-            read -rp "Enter a file path for the process ID: " value
-            ;;
-        Port)
-            read -rp "Enter a port number: " value
-            ;;
-        Protocol)
-            options=("1" "2")
-            ;;
-        RequiredAuthentications)
-            options=("none" "keyboard-interactive" "publickey" "publickey,keyboard-interactive")
-            ;;
-        Subsystem)
-            read -rp "Enter a subsystem name and a command to execute: " value
-            ;;
-        SyslogFacility)
-            options=("DAEMON" "USER" "AUTH" "AUTHPRIV" "LOCAL0" "LOCAL1" "LOCAL2" "LOCAL3" "LOCAL4" "LOCAL5" "LOCAL6" "LOCAL7")
-            ;;
-        X11DisplayOffset)
-            read -rp "Enter an integer value for the display offset: " value
-            ;;
-        *)
-            echo "Unsupported parameter: $parameter" >&2
-            return 1
-            ;;
-    esac
-
-    if [ ${#options[@]} -gt 0 ]; then
-        PS3="Select an option: "
-        select opt in "${options[@]}"; do
-            if [[ -n $opt ]]; then
-                value=$opt
-                break
-            fi
-        done
+  # Si es de tipo 'choice', se muestran las opciones.
+  if [[ "$type" == "choice" && -n "$choices" ]]; then
+    IFS=',' read -ra opts <<< "$choices"
+    echo "Opciones disponibles:"
+    local idx=1
+    for opt in "${opts[@]}"; do
+      echo "  $idx) $opt"
+      ((idx++))
+    done
+    while true; do
+      read -rp "Seleccione una opción (número) o presione Enter para usar el valor por defecto: " sel
+      if [[ -z "$sel" ]]; then
+        input="$def"
+        break
+      elif [[ "$sel" =~ ^[0-9]+$ ]] && (( sel >= 1 && sel <= ${#opts[@]} )); then
+        input="${opts[$((sel-1))]}"
+        break
+      else
+        echo "Entrada inválida. Intente nuevamente."
+      fi
+    done
+  elif [[ "$type" == "number" ]]; then
+    while true; do
+      read -rp "Ingrese un número o presione Enter para usar el valor por defecto: " inp
+      if [[ -z "$inp" ]]; then
+        input="$def"
+        break
+      elif [[ "$inp" =~ ^[0-9]+$ ]]; then
+        input="$inp"
+        break
+      else
+        echo "Debe ingresar un valor numérico."
+      fi
+    done
+  else
+    # Para tipo texto, se acepta cualquier entrada (se usa el valor por defecto si está vacío)
+    read -rp "Ingrese el valor o presione Enter para usar el valor por defecto: " inp
+    if [[ -z "$inp" ]]; then
+      input="$def"
+    else
+      input="$inp"
     fi
-    if [[ $value == "" ]];
-    then
-     value=$default_value
-    fi
-    echo "${parameter}${value:+ }$value${value:+$'\n'}" >> sshd_config.example
+  fi
+
+  # Para parámetros opcionales que pueden quedar vacíos, se conserva el valor "<vacío>" o se escribe nada.
+  if [[ "$input" == "<vacío>" ]]; then
+    input=""
+  fi
+
+  # Escribe la línea de configuración (se respeta la sintaxis: Clave [valor])
+  if [[ -n "$input" ]]; then
+    echo "$param $input" >> "$generated_file"
+  else
+    # Si el valor quedó vacío, se comenta la línea (el parámetro se omite)
+    echo "# $param" >> "$generated_file"
+  fi
 }
 
-# loop over the keys and values
-for key in "${!ssh_params[@]}"; do
-  # split the string into an array
-  IFS=, read -r definition default_value <<< "${ssh_params[$key]}"
-  echo "$key: $definition (default $default_value)"
-  read_value $key $default_value
+# Crea (o limpia) el archivo generado.
+> "$generated_file"
+{
+  echo "# Archivo generado interactivamente por el script"
+  echo "# Fecha: $(date)"
+  echo ""
+} >> "$generated_file"
+
+# Itera sobre cada parámetro y solicita su valor.
+for entry in "${params[@]}"; do
+  IFS='|' read -r param description def type choices <<< "$entry"
+  prompt_parameter "$param" "$description" "$def" "$type" "$choices"
 done
 
-
-#### Definiciones Pros y Contras
-#El parámetro "acceptenv" permite que el servidor acepte variables de entorno enviadas por el cliente, lo que puede ser útil para personalizar la sesión. Los pros incluyen la capacidad de personalizar la sesión y aumentar la flexibilidad, mientras que los contras incluyen el riesgo de que se envíen variables maliciosas que podrían comprometer la seguridad del sistema.
-#El parámetro "addressfamily" permite especificar la familia de direcciones a utilizar (IPv4 o IPv6) para la conexión. Los pros incluyen la capacidad de especificar la familia de direcciones más adecuada para la red en uso, mientras que los contras incluyen la posible incompatibilidad con algunos sistemas o redes.
-#El parámetro "allowagentforwarding" permite la reutilización de claves privadas en diferentes sistemas sin la necesidad de transferirlas manualmente. Los pros incluyen la mayor comodidad y eficiencia, mientras que los contras incluyen el riesgo de comprometer la seguridad al permitir que una clave privada se propague a través de múltiples sistemas.
-#El parámetro "allowstreamlocalforwarding" permite la creación de canales de comunicación adicionales entre el cliente y el servidor. Los pros incluyen la capacidad de crear canales personalizados y aumentar la flexibilidad, mientras que los contras incluyen el riesgo de comprometer la seguridad si se permite la comunicación con recursos no autorizados.
-#El parámetro "allowtcpforwarding" permite la redirección de tráfico TCP a través del túnel SSH. Los pros incluyen la capacidad de utilizar recursos remotos y aumentar la eficiencia, mientras que los contras incluyen el riesgo de comprometer la seguridad si se permite el tráfico no autorizado a través del túnel SSH.
-#El parámetro "authenticationmethods" permite especificar los métodos de autenticación permitidos para la conexión. Los pros incluyen la capacidad de adaptarse a diferentes políticas de seguridad y mejorar la seguridad al requerir múltiples formas de autenticación. Sin embargo, los contras incluyen la posible complejidad de configuración y la necesidad de asegurarse de que todos los métodos de autenticación utilizados sean seguros.
-#El parámetro "authorizedkeyscommand" permite especificar un comando para obtener las claves de autorización de un servidor remoto. Los pros incluyen la capacidad de automatizar la gestión de claves de autorización y mejorar la seguridad al evitar la necesidad de transferir manualmente las claves. Los contras incluyen la posible complejidad de configuración y el riesgo de que el comando de autorización no sea seguro.
-#El parámetro "authorizedkeyscommanduser" permite especificar el usuario para ejecutar el comando "authorizedkeyscommand". Los pros incluyen la capacidad de mejorar la seguridad al limitar los permisos del usuario que ejecuta el comando. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se otorguen permisos insuficientes al usuario.
-#El parámetro "authorizedkeysfile" permite especificar la ubicación de las claves de autorización en el servidor. Los pros incluyen la capacidad de personalizar la ubicación de las claves de autorización y mejorar la seguridad al limitar el acceso a ellas. Los contras incluyen la posible complejidad de configuración y el riesgo de que se especifique una ubicación insegura para las claves.
-#El parámetro "authorizedprincipalscommand" permite especificar un comando para obtener los principios de autorización de un servidor remoto. Los pros incluyen la capacidad de automatizar la gestión de principios de autorización y mejorar la seguridad al evitar la necesidad de transferir manualmente los principios. Los contras incluyen la posible complejidad de configuración y el riesgo de que el comando de autorización no sea seguro.
-#El parámetro "authorizedprincipalscommanduser" permite especificar el usuario para ejecutar el comando "authorizedprincipalscommand". Los pros incluyen la capacidad de mejorar la seguridad al limitar los permisos del usuario que ejecuta el comando. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se otorguen permisos insuficientes al usuario.
-#El parámetro "authorizedprincipalsfile" permite especificar la ubicación de los principios de autorización en el servidor. Los pros incluyen la capacidad de personalizar la ubicación de los principios de autorización y mejorar la seguridad al limitar el acceso a ellos. Los contras incluyen la posible complejidad de configuración y el riesgo de que se especifique una ubicación insegura para los principios.
-#El parámetro "banner" permite especificar un mensaje de advertencia que se mostrará al iniciar sesión en el servidor. Los pros incluyen la capacidad de personalizar el mensaje de advertencia y mejorar la seguridad al informar a los usuarios sobre la política de seguridad del servidor. Sin embargo, los contras incluyen el riesgo de que el mensaje sea ignorado o que pueda ser utilizado como parte de un ataque de phishing.
-#El parámetro "casignaturealgorithms" permite especificar los algoritmos de firma que se pueden utilizar para firmar certificados de CA. Los pros incluyen la capacidad de personalizar la seguridad y aumentar la eficiencia mediante el uso de algoritmos más eficientes. Sin embargo, los contras incluyen el riesgo de que se permita el uso de algoritmos de firma débiles o comprometidos que puedan comprometer la seguridad del sistema.
-#El parámetro "chrootdirectory" permite especificar el directorio raíz para la sesión SSH. Los pros incluyen la capacidad de aumentar la seguridad al limitar el acceso a los recursos del sistema. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se configure incorrectamente, lo que podría impedir el acceso a los recursos necesarios.
-#El parámetro "ciphers" permite especificar los cifrados que se pueden utilizar para la conexión. Los pros incluyen la capacidad de personalizar la seguridad y aumentar la eficiencia mediante el uso de cifrados más eficientes. Sin embargo, los contras incluyen el riesgo de que se permita el uso de cifrados débiles o comprometidos que puedan comprometer la seguridad del sistema.
-#El parámetro "clientalivecountmax" permite especificar el número máximo de mensajes keep-alive que se enviarán antes de desconectar al cliente. Los pros incluyen la capacidad de aumentar la eficiencia y reducir el riesgo de sesiones inactivas. Sin embargo, los contras incluyen el riesgo de que se configure incorrectamente y se desconecte a los clientes que están activos pero no envían mensajes keep-alive.
-#El parámetro "clientaliveinterval" permite especificar el intervalo de tiempo entre los mensajes keep-alive enviados al cliente. Los pros incluyen la capacidad de aumentar la eficiencia y reducir el riesgo de sesiones inactivas. Sin embargo, los contras incluyen el riesgo de que se configure incorrectamente y se envíen demasiados mensajes keep-alive, lo que podría afectar la eficiencia del sistema.
-#El parámetro "compression" permite habilitar la compresión de datos para reducir el ancho de banda utilizado por la conexión. Los pros incluyen la capacidad de aumentar la eficiencia y reducir los costos de ancho de banda. Sin embargo, los contras incluyen el riesgo de que la compresión pueda comprometer la seguridad si se utilizan algoritmos de compresión débiles o si se comprimen datos confidenciales.
-#El parámetro "disableforwarding" permite deshabilitar el reenvío de puertos en la sesión. Los pros incluyen la capacidad de aumentar la seguridad al evitar que se reenvíen puertos no autorizados. Sin embargo, los contras incluyen la posible limitación de la funcionalidad y la necesidad de configurar cuidadosamente los permisos para evitar interrupciones no deseadas.
-#El parámetro "exposeauthinfo" permite mostrar información sobre la autenticación del usuario en la sesión. Los pros incluyen la capacidad de aumentar la transparencia y mejorar la seguridad al permitir que los usuarios supervisen su propia actividad de autenticación. Sin embargo, los contras incluyen el riesgo de que la información de autenticación pueda ser utilizada maliciosamente si cae en manos equivocadas.
-#El parámetro "fingerprinthash" permite especificar el algoritmo hash que se utilizará para mostrar la huella digital del servidor. Los pros incluyen la capacidad de personalizar la seguridad y aumentar la transparencia al mostrar la huella digital de manera clara. Sin embargo, los contras incluyen el riesgo de que se utilice un algoritmo hash débil o comprometido que pueda comprometer la seguridad del sistema.
-#El parámetro "forcecommand" permite especificar el comando que se ejecutará en la sesión. Los pros incluyen la capacidad de personalizar la funcionalidad y aumentar la seguridad al limitar la funcionalidad disponible en la sesión. Sin embargo, los contras incluyen la posible complejidad de configuración y la necesidad de asegurarse de que el comando especificado sea seguro y adecuado para su propósito previsto.
-#El parámetro "gatewayports" permite que los puertos del servidor remoto se reenvíen a través del túnel SSH. Los pros incluyen la capacidad de aumentar la funcionalidad y la flexibilidad al permitir el acceso a los recursos remotos. Sin embargo, los contras incluyen el riesgo de comprometer la seguridad si se permiten puertos no autorizados.
-#El parámetro "gssapiauthentication" permite la autenticación a través del protocolo GSSAPI. Los pros incluyen la capacidad de aumentar la seguridad mediante el uso de un protocolo de autenticación más fuerte. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se utilice un protocolo GSSAPI débil o comprometido.
-#El parámetro "gssapicleanupcredentials" permite la eliminación de las credenciales GSSAPI después de la sesión. Los pros incluyen la capacidad de aumentar la seguridad al evitar la posibilidad de que se acceda a las credenciales después de la sesión. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que las credenciales se eliminen demasiado pronto y se requiera una nueva autenticación.
-#El parámetro "gssapikexalgorithms" permite especificar los algoritmos de intercambio de claves que se utilizarán para la autenticación GSSAPI. Los pros incluyen la capacidad de personalizar la seguridad y aumentar la eficiencia mediante el uso de algoritmos más eficientes. Sin embargo, los contras incluyen el riesgo de que se permita el uso de algoritmos de intercambio de claves débiles o comprometidos.
-#El parámetro "gssapikeyexchange" permite el intercambio de claves a través del protocolo GSSAPI. Los pros incluyen la capacidad de aumentar la seguridad mediante el uso de un protocolo de intercambio de claves más fuerte. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se utilice un protocolo de intercambio de claves GSSAPI débil o comprometido.
-#El parámetro "gssapistorecredentialsonrekey" permite almacenar las credenciales GSSAPI después de una rekey de sesión. Los pros incluyen la capacidad de aumentar la eficiencia y reducir la necesidad de una nueva autenticación. Sin embargo, los contras incluyen el riesgo de que se acceda a las credenciales almacenadas de manera no autorizada después de una rekey de sesión.
-#El parámetro "gssapistrictacceptorcheck" permite limitar la aceptación de credenciales GSSAPI a determinados aceptores. Los pros incluyen la capacidad de aumentar la seguridad al limitar la aceptación de credenciales GSSAPI a aceptores autorizados. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se configure incorrectamente y se limiten las conexiones legítimas.
-#El parámetro "hostbasedacceptedalgorithms" permite especificar los algoritmos de autenticación que se aceptarán para la autenticación basada en host. Los pros incluyen la capacidad de personalizar la seguridad y aumentar la eficiencia mediante el uso de algoritmos más eficientes. Sin embargo, los contras incluyen el riesgo de que se permita el uso de algoritmos de autenticación débiles o comprometidos.
-#El parámetro "hostbasedauthentication" permite la autenticación basada en host, que utiliza la dirección IP y el nombre del host como credenciales de autenticación. Los pros incluyen la capacidad de aumentar la seguridad mediante el uso de múltiples credenciales para la autenticación. Sin embargo, los contras incluyen el riesgo de que la autenticación basada en host sea vulnerable a ataques de spoofing de direcciones IP o nombres de host falsificados.
-#El parámetro "hostbasedusesnamefrompacketonly" permite utilizar solo el nombre del host del paquete para la autenticación basada en host. Los pros incluyen la capacidad de aumentar la eficiencia y reducir el riesgo de spoofing de nombres de host falsificados. Sin embargo, los contras incluyen el riesgo de que se ignoren otras credenciales importantes para la autenticación.
-#El parámetro "hostkey" permite especificar la ubicación de las claves de host en el servidor. Los pros incluyen la capacidad de personalizar la ubicación de las claves de host y mejorar la seguridad al limitar el acceso a ellas. Los contras incluyen la posible complejidad de configuración y el riesgo de que se especifique una ubicación insegura para las claves.
-#El parámetro "hostkeyagent" permite la carga de claves de host desde un agente de claves en el cliente. Los pros incluyen la capacidad de aumentar la eficiencia y reducir la necesidad de transferir manualmente las claves de host. Sin embargo, los contras incluyen el riesgo de que el agente de claves sea comprometido y se acceda a las claves de host de manera no autorizada.
-#El parámetro "hostkeyalgorithms" permite especificar los algoritmos de claves de host que se utilizarán para la conexión. Los pros incluyen la capacidad de personalizar la seguridad y aumentar la eficiencia mediante el uso de algoritmos más eficientes. Sin embargo, los contras incluyen el riesgo de que se permita el uso de algoritmos de claves de host débiles o comprometidos.
-#El parámetro "ignorerhosts" permite ignorar la lista de hosts conocidos en el cliente. Los pros incluyen la capacidad de aumentar la flexibilidad y la eficiencia al evitar la necesidad de mantener una lista de hosts conocidos. Sin embargo, los contras incluyen el riesgo de que se conecte a hosts no autorizados o comprometidos.
-#El parámetro "ignoreuserknownhosts" permite ignorar la lista de hosts conocidos del usuario en el cliente. Los pros incluyen la capacidad de aumentar la flexibilidad y la eficiencia al evitar la necesidad de mantener una lista de hosts conocidos del usuario. Sin embargo, los contras incluyen el riesgo de que se conecte a hosts no autorizados o comprometidos y de que se omitan las advertencias de seguridad.
-#El parámetro "ipqos" permite especificar el nivel de calidad de servicio (QoS) que se utilizará para la conexión. Los pros incluyen la capacidad de personalizar la eficiencia y la calidad de la conexión. Sin embargo, los contras incluyen el riesgo de que se configure incorrectamente y se afecte negativamente la calidad de la conexión.
-#El parámetro "kbdinteractiveauthentication" permite la autenticación interactiva del usuario mediante el teclado. Los pros incluyen la capacidad de aumentar la seguridad al requerir la autenticación del usuario en cada sesión. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se permita el acceso a usuarios no autorizados.
-#El parámetro "kerberosauthentication" permite la autenticación mediante el protocolo Kerberos. Los pros incluyen la capacidad de aumentar la seguridad mediante el uso de un protocolo de autenticación más fuerte. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se utilice un protocolo Kerberos débil o comprometido.
-#El parámetro "kerberosorlocalpasswd" permite la autenticación mediante Kerberos o contraseñas locales. Los pros incluyen la capacidad de aumentar la flexibilidad al permitir que los usuarios utilicen Kerberos o contraseñas locales para la autenticación. Sin embargo, los contras incluyen el riesgo de que se permita el uso de contraseñas débiles o comprometidas y la posible complejidad de configuración.
-#El parámetro "kerberosticketcleanup" permite la eliminación de los tickets Kerberos después de la sesión. Los pros incluyen la capacidad de aumentar la seguridad al evitar la posibilidad de que se acceda a los tickets Kerberos después de la sesión. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que los tickets se eliminen demasiado pronto y se requiera una nueva autenticación.
-#El parámetro "kexalgorithms" permite especificar los algoritmos de intercambio de claves que se utilizarán para la conexión. Los pros incluyen la capacidad de personalizar la seguridad y aumentar la eficiencia mediante el uso de algoritmos más eficientes. Sin embargo, los contras incluyen el riesgo de que se permita el uso de algoritmos de intercambio de claves débiles o comprometidos.
-#El parámetro "listenaddress" permite especificar las direcciones IP locales que escucharán para conexiones entrantes. Los pros incluyen la capacidad de aumentar la seguridad al limitar las direcciones IP que pueden conectarse al servidor SSH. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se especifiquen direcciones IP incorrectas.
-#El parámetro "listenaddress" permite especificar las direcciones IP locales que escucharán para conexiones entrantes. Los pros incluyen la capacidad de aumentar la seguridad al limitar las direcciones IP que pueden conectarse al servidor SSH. Sin embargo, los contras incluyen la posible complejidad de configuración y el riesgo de que se especifiquen direcciones IP incorrectas.
-#El parámetro "logingracetime" permite especificar el tiempo permitido para la autenticación antes de que se cierre la sesión. Los pros incluyen la capacidad de aumentar la seguridad al limitar el tiempo que los usuarios no autenticados pueden intentar acceder al servidor. Sin embargo, los contras incluyen el riesgo de que se especifique un tiempo demasiado corto y se interrumpa la autenticación legítima.
-#El parámetro "loglevel" permite especificar el nivel de verbosidad de los registros del servidor SSH. Los pros incluyen la capacidad de personalizar la cantidad de información que se registra y mejorar la eficiencia al reducir la cantidad de registros innecesarios. Sin embargo, los contras incluyen el riesgo de que se configure incorrectamente y se pierdan registros importantes o se registre demasiada información.
-#El parámetro "macs" permite especificar los algoritmos de códigos de autenticación de mensajes que se utilizarán para la conexión. Los pros incluyen la capacidad de personalizar la seguridad y aumentar la eficiencia mediante el uso de algoritmos más eficientes. Sin embargo, los contras incluyen el riesgo de que se permita el uso de algoritmos de códigos de autenticación de mensajes débiles o comprometidos.
-#El parámetro "maxauthtries" permite especificar el número máximo de intentos de autenticación permitidos antes de que se cierre la conexión. Los pros incluyen la capacidad de aumentar la seguridad al limitar el número de intentos de autenticación que pueden realizarse antes de que se bloquee la conexión. Sin embargo, los contras incluyen el riesgo de que se especifique un número demasiado bajo y se bloquee la autenticación legítima.
-#El parámetro "maxsessions" permite especificar el número máximo de sesiones de conexión permitidas para un usuario. Los pros incluyen la capacidad de aumentar la seguridad al limitar el número de sesiones que un usuario puede tener abiertas simultáneamente. Sin embargo, los contras incluyen el riesgo de que se especifique un número demasiado bajo y se limite la funcionalidad del usuario o se bloquee la conexión legítima.
-#El parámetro "maxstartups" permite especificar el número máximo de conexiones entrantes permitidas al mismo tiempo. Los pros incluyen la capacidad de aumentar la seguridad al limitar el número de conexiones que pueden realizarse simultáneamente. Sin embargo, los contras incluyen el riesgo de que se especifique un número demasiado bajo y se bloquee la conexión legítima.
-#El parámetro "modulifile" permite especificar la ubicación de los módulos adicionales que se cargarán en el servidor SSH. Los pros incluyen la capacidad de personalizar la funcionalidad del servidor SSH y aumentar la eficiencia mediante el uso de módulos más eficientes. Sin embargo, los contras incluyen el riesgo de que se especifique una ubicación insegura para los módulos o se carguen módulos maliciosos.
-#El parámetro "passwordauthentication" permite la autenticación de los usuarios mediante contraseñas. Los pros incluyen la simplicidad de la autenticación y la capacidad de permitir a los usuarios utilizar contraseñas existentes. Sin embargo, los contras incluyen la vulnerabilidad a ataques de fuerza bruta y el riesgo de que los usuarios utilicen contraseñas débiles o comprometidas.
-#El parámetro "permitemptypasswords" permite la autenticación de los usuarios con contraseñas vacías. Los pros incluyen la simplicidad de la autenticación y la capacidad de permitir a los usuarios utilizar contraseñas vacías para la autenticación. Sin embargo, los contras incluyen la vulnerabilidad a ataques de fuerza bruta y el riesgo de que los usuarios no utilicen contraseñas seguras o comprometidas. Además, esto es una mala práctica de seguridad y no se recomienda utilizarlo en un ambiente de producción.
-#El parámetro "permitlisten" permite que los usuarios del cliente abran sockets de escucha en el servidor SSH. Los pros incluyen la capacidad de permitir conexiones de red entrantes y la personalización de la funcionalidad del servidor SSH. Sin embargo, los contras incluyen el riesgo de que se permita el acceso a usuarios no autorizados y se utilice para fines malintencionados.
-#El parámetro "permitopen" permite que los usuarios del cliente abran túneles de red en el servidor SSH. Los pros incluyen la capacidad de permitir conexiones de red entrantes y la personalización de la funcionalidad del servidor SSH. Sin embargo, los contras incluyen el riesgo de que se permita el acceso a usuarios no autorizados y se utilice para fines malintencionados.
-#El parámetro "permitrootlogin" permite la conexión directa del usuario root en el servidor SSH. Los pros incluyen la capacidad de permitir el acceso rápido y eficiente del usuario root al servidor SSH. Sin embargo, los contras incluyen la vulnerabilidad a ataques de fuerza bruta y el riesgo de que se utilice para fines malintencionados.
-#El parámetro "permittty" permite la asignación de una TTY al usuario remoto en la conexión SSH. Los pros incluyen la capacidad de permitir al usuario remoto interactuar con el servidor SSH y mejorar la eficiencia de la conexión. Sin embargo, los contras incluyen el riesgo de que se permita el acceso a usuarios no autorizados y se utilice para fines malintencionados.
-#El parámetro "permittunnel" permite la creación de túneles de red en la conexión SSH. Los pros incluyen la capacidad de permitir conexiones de red seguras y la personalización de la funcionalidad del servidor SSH. Sin embargo, los contras incluyen el riesgo de que se permita el acceso a usuarios no autorizados y se utilice para fines malintencionados.
-#El parámetro "permituserenvironment" permite que los usuarios especifiquen variables de entorno personalizadas en la conexión SSH. Los pros incluyen la personalización de la conexión SSH y la flexibilidad para los usuarios. Sin embargo, los contras incluyen el riesgo de que se permita el acceso a usuarios no autorizados y se utilice para fines malintencionados.
-#El parámetro "permituserrc" permite que los usuarios carguen archivos de configuración personalizados en la conexión SSH. Los pros incluyen la personalización de la conexión SSH y la flexibilidad para los usuarios. Sin embargo, los contras incluyen el riesgo de que se permita el acceso a usuarios no autorizados y se utilice para fines malintencionados.
-#El parámetro "persourcemaxstartups" permite especificar el número máximo de conexiones entrantes permitidas desde una dirección IP específica. Los pros incluyen la capacidad de aumentar la seguridad al limitar el número de conexiones que se pueden realizar desde una dirección IP específica. Sin embargo, los contras incluyen el riesgo de que se especifique un número demasiado bajo y se bloquee la conexión legítima.
-#El parámetro "persourcenetblocksize" permite especificar el tamaño de bloque de red que se utilizará para la conexión SSH. Los pros incluyen la capacidad de personalizar la eficiencia y la calidad de la conexión. Sin embargo, los contras incluyen el riesgo de que se configure incorrectamente y se afecte negativamente la calidad de la conexión.
-#El parámetro "pidfile" permite especificar la ubicación del archivo de identificación de proceso (PID) para el servidor SSH. Los pros incluyen la capacidad de rastrear el proceso de SSH y personalizar la ubicación del archivo PID. Sin embargo, los contras incluyen el riesgo de que se especifique una ubicación insegura y se comprometa la seguridad del sistema.
-#El parámetro "port" permite especificar el puerto en el que escucha el servidor SSH. Los pros incluyen la capacidad de personalizar la seguridad y la eficiencia de la conexión. Sin embargo, los contras incluyen el riesgo de que se especifique un puerto incorrecto y se comprometa la seguridad del sistema.
-#El parámetro "printlastlog" permite que el servidor SSH muestre el último registro de inicio de sesión del usuario en la conexión SSH. Los pros incluyen la capacidad de proporcionar información de inicio de sesión útil para el usuario. Sin embargo, los contras incluyen el riesgo de que se muestre información confidencial de inicio de sesión del usuario a personas no autorizadas.
-#El parámetro "printmotd" permite que el servidor SSH muestre el mensaje del día (MOTD) en la conexión SSH. Los pros incluyen la capacidad de proporcionar información útil para el usuario. Sin embargo, los contras incluyen el riesgo de que se muestre información confidencial del sistema a personas no autorizadas.
-#El parámetro "pubkeyacceptedalgorithms" permite especificar los algoritmos de autenticación de clave pública que se utilizarán para la conexión SSH. Los pros incluyen la capacidad de personalizar la seguridad y la eficiencia de la conexión mediante el uso de algoritmos más eficientes. Sin embargo, los contras incluyen el riesgo de que se permita el uso de algoritmos de autenticación de clave pública débiles o comprometidos.
-#El parámetro "pubkeyauthentication" permite la autenticación de los usuarios mediante claves públicas. Los pros incluyen la seguridad mejorada y la reducción del riesgo de ataques de fuerza bruta. Sin embargo, los contras incluyen la necesidad de crear y gestionar las claves públicas y privadas del usuario.
-#El parámetro "pubkeyauthoptions" permite especificar opciones adicionales de autenticación de clave pública para la conexión SSH. Los pros incluyen la personalización de la autenticación de clave pública y la mejora de la seguridad de la conexión SSH. Sin embargo, los contras incluyen la necesidad de entender y configurar correctamente las opciones de autenticación de clave pública.
-#El parámetro "rekeylimit" permite especificar el número máximo de bytes de datos que se pueden enviar o recibir antes de que se genere una nueva clave de sesión. Los pros incluyen la seguridad mejorada y la reducción del riesgo de comprometer las claves de sesión. Sin embargo, los contras incluyen el riesgo de que se especifique un número demasiado bajo y se reduzca la eficiencia de la conexión.
-#El parámetro "revokedkeys" permite especificar las claves públicas que se han revocado y no se deben utilizar para la conexión SSH. Los pros incluyen la seguridad mejorada y la reducción del riesgo de que se utilicen claves comprometidas o no autorizadas. Sin embargo, los contras incluyen la necesidad de mantener una lista actualizada de las claves públicas revocadas.
-#El parámetro "securitykeyprovider" permite especificar el proveedor de clave de seguridad que se utilizará para la autenticación de clave pública. Los pros incluyen la personalización de la autenticación de clave pública y la mejora de la seguridad de la conexión SSH. Sin embargo, los contras incluyen la necesidad de entender y configurar correctamente el proveedor de clave de seguridad.
-#El parámetro "streamlocalbindmask" permite especificar los permisos que se aplicarán a los archivos de socket de enlace local que se creen en el servidor SSH. Los pros incluyen la personalización de la seguridad y la eficiencia de la conexión SSH. Sin embargo, los contras incluyen el riesgo de que se especifique un conjunto incorrecto de permisos y se comprometa la seguridad del sistema.
-#El parámetro "streamlocalbindunlink" permite que los archivos de socket de enlace local se eliminen automáticamente cuando se cierra la conexión SSH. Los pros incluyen la mejora de la seguridad y la eficiencia de la conexión SSH. Sin embargo, los contras incluyen el riesgo de que se eliminen archivos importantes por error.
-#El parámetro "strictmodes" permite que el servidor SSH aplique los permisos de archivo estrictamente. Los pros incluyen la mejora de la seguridad al limitar el acceso a los archivos a los usuarios autorizados. Sin embargo, los contras incluyen la necesidad de configurar adecuadamente los permisos de archivo y la posible incompatibilidad con ciertas aplicaciones.
-#El parámetro "subsystem" permite especificar el subsistema que se utilizará para la conexión SSH. Los pros incluyen la personalización de la funcionalidad del servidor SSH. Sin embargo, los contras incluyen el riesgo de que se utilice un subsistema malicioso y se comprometa la seguridad del sistema.
-#El parámetro "syslogfacility" permite especificar la facilidad de syslog que se utilizará para registrar los eventos del servidor SSH. Los pros incluyen la personalización de la ubicación y el nivel de los registros del servidor SSH. Sin embargo, los contras incluyen la necesidad de entender correctamente las opciones de syslog y la posible incompatibilidad con ciertas aplicaciones.
-#El parámetro "tcpkeepalive" permite la activación del mecanismo de detección de conexión inactiva en la conexión TCP. Los pros incluyen la mejora de la eficiencia y la estabilidad de la conexión SSH. Sin embargo, los contras incluyen el riesgo de que se especifique un tiempo de espera demasiado corto y se interrumpa la conexión de forma innecesaria.
-#El parámetro "trustedusercakeys" permite la especificación de las claves de autoridad de certificación que se utilizarán para verificar las claves de usuario. Los pros incluyen la seguridad mejorada y la reducción del riesgo de ataques de falsificación de identidad. Sin embargo, los contras incluyen la necesidad de mantener una lista actualizada de las claves de autoridad de certificación y la posible incompatibilidad con ciertas aplicaciones.
-#El parámetro "usedns" permite la resolución DNS de las direcciones IP en la conexión SSH. Los pros incluyen la personalización de la conexión SSH y la mejora de la eficiencia. Sin embargo, los contras incluyen el riesgo de que se produzca una resolución DNS incorrecta y se comprometa la seguridad del sistema.
-#El parámetro "usepam" permite la autenticación de los usuarios a través del módulo de autenticación de pluggable authentication module (PAM). Los pros incluyen la mejora de la seguridad y la flexibilidad de la conexión SSH. Sin embargo, los contras incluyen la posible incompatibilidad con ciertas aplicaciones y la necesidad de configurar correctamente los módulos PAM.
-#El parámetro "versionaddendum" permite la adición de un texto personalizado al banner de SSH que se muestra al usuario al conectarse al servidor SSH. Los pros incluyen la personalización de la conexión SSH y la mejora de la experiencia del usuario. Sin embargo, los contras incluyen el riesgo de que se muestre información confidencial del sistema y se comprometa la seguridad del sistema.
-#El parámetro "x11displayoffset" permite especificar un desplazamiento para el número de pantalla de X11 que se utilizará en la conexión SSH. Los pros incluyen la personalización de la conexión SSH y la mejora de la eficiencia. Sin embargo, los contras incluyen el riesgo de que se especifique un número de pantalla incorrecto y se comprometa la seguridad del sistema.
-#El parámetro "x11forwarding" permite que los programas de X11 se ejecuten en el cliente SSH y se muestren en el servidor SSH. Los pros incluyen la capacidad de ejecutar programas gráficos en una conexión SSH y la mejora de la eficiencia. Sin embargo, los contras incluyen el riesgo de que se utilice un programa malicioso de X11 y se comprometa la seguridad del sistema.
-#El parámetro "x11uselocalhost" permite que el reenvío de X11 se realice solo a través de la conexión local en lugar de a través de la red. Los pros incluyen la mejora de la seguridad y la eficiencia del reenvío de X11. Sin embargo, los contras incluyen la posible incompatibilidad con ciertas aplicaciones y la necesidad de configurar adecuadamente la red.
-#El parámetro "xauthlocation" permite especificar la ubicación del archivo de autorización de X11 que se utilizará para la conexión SSH. Los pros incluyen la personalización de la conexión SSH y la mejora de la eficiencia. Sin embargo, los contras incluyen el riesgo de que se especifique una ubicación incorrecta y se comprometa la seguridad del sistema.
+echo "-----------------------------------------------------------------------"
+echo "Archivo de configuración generado: $generated_file"
+echo "Revise el contenido y, si está correcto, aplíquelo:"
+echo "  cp $generated_file /etc/ssh/sshd_config && systemctl restart sshd"
+exit 0
