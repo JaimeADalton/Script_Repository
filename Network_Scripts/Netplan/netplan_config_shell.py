@@ -17,8 +17,9 @@ from ipaddress import IPv4Network, IPv4Interface, IPv4Address
 import yaml
 from typing import List, Dict, Any, Optional
 
-# Configuración de archivos
-NETPLAN_FILE = Path("00-installer-config.yaml")
+# Configuración de archivos con rutas completas
+NETPLAN_DIR = Path("/etc/netplan")
+NETPLAN_FILE = NETPLAN_DIR / "00-installer-config.yaml"
 BACKUP_FILE = NETPLAN_FILE.with_suffix(".yaml.bak")
 
 # Configuración de colores
@@ -143,18 +144,60 @@ def configure_interface(interface: dict) -> dict:
         config["routes"] = [{"to": "default", "via": gateway}]
 
         if get_user_input("¿Desea añadir rutas estáticas adicionales? (s/n): ", lambda x: x.lower() in ['s', 'n']) == 's':
+            added_routes = []
             while True:
                 to = get_user_input("Ingrese la red de destino (ej. 192.168.2.0/24) o 'q' para terminar: ",
                                    lambda x: x.lower() == 'q' or is_valid_cidr(x))
                 if to is None or to.lower() == 'q':
                     break
+                    
                 via = get_user_input("Ingrese la puerta de enlace para esta ruta: ", is_valid_ip)
                 if via is None:
                     continue
-                config["routes"].append({"to": to, "via": via})
-
-                if get_user_input("¿Desea eliminar esta ruta? (s/n): ", lambda x: x.lower() in ['s', 'n']) == 's':
-                    config["routes"].pop()
+                    
+                # Añadir la ruta
+                new_route = {"to": to, "via": via}
+                config["routes"].append(new_route)
+                added_routes.append(new_route)
+                
+                print(f"{Colors.GREEN}Ruta añadida: Destino {to} vía {via}{Colors.END}")
+                
+                # Preguntar si quiere añadir más rutas
+                if get_user_input("¿Desea añadir otra ruta estática? (s/n): ", lambda x: x.lower() in ['s', 'n']) != 's':
+                    break
+                    
+            # Si se añadieron rutas, mostrar un resumen y preguntar si quiere eliminar alguna
+            if added_routes:
+                print(f"\n{Colors.CYAN}Rutas estáticas configuradas:{Colors.END}")
+                # Mostrar solo las rutas adicionales (no la ruta default)
+                routes_to_show = [r for r in config["routes"] if r.get("to") != "default"]
+                for i, route in enumerate(routes_to_show, 1):
+                    print(f"{i}. Destino: {route['to']}, vía: {route['via']}")
+                    
+                if get_user_input("\n¿Desea eliminar alguna ruta? (s/n): ", lambda x: x.lower() in ['s', 'n']) == 's':
+                    while True:
+                        route_index = get_user_input(
+                            "Ingrese el número de la ruta a eliminar (0 para terminar): ",
+                            lambda x: x.isdigit() and 0 <= int(x) <= len(routes_to_show)
+                        )
+                        
+                        if route_index is None or route_index == '0':
+                            break
+                            
+                        idx = int(route_index) - 1
+                        deleted_route = routes_to_show[idx]
+                        
+                        # Buscar y eliminar la ruta del config
+                        for i, r in enumerate(config["routes"]):
+                            if r == deleted_route:
+                                config["routes"].pop(i)
+                                routes_to_show.pop(idx)
+                                break
+                                
+                        print(f"{Colors.YELLOW}Ruta eliminada: Destino {deleted_route['to']} vía {deleted_route['via']}{Colors.END}")
+                        
+                        if not routes_to_show or get_user_input("¿Desea eliminar otra ruta? (s/n): ", lambda x: x.lower() in ['s', 'n']) != 's':
+                            break
 
     if get_user_input("¿Desea configurar nameservers? (s/n): ", lambda x: x.lower() in ['s', 'n']) == 's':
         while True:
@@ -172,17 +215,6 @@ def configure_interface(interface: dict) -> dict:
             print(f"{Colors.RED}Valor de MTU inválido. Debe ser un número entre 500 y 9000.{Colors.END}")
 
     return config
-
-def get_interface_mac_raw(interface):
-    """Obtiene la dirección MAC de la interfaz como bytes"""
-    try:
-        with open(f"/sys/class/net/{interface}/address", "r") as f:
-            mac_str = f.read().strip()
-            # Convertir string MAC a bytes
-            return bytes.fromhex(mac_str.replace(":", ""))
-    except Exception as e:
-        print(f"Error obteniendo MAC raw: {e}")
-        return None
 
 def get_interface_mac(interface):
     """Obtiene la dirección MAC de la interfaz como string"""
@@ -205,31 +237,9 @@ def get_interface_ip(interface):
         print(f"Error obteniendo IP: {e}")
         return None
 
-def build_arp_packet(src_mac_raw, src_ip, target_ip):
-    """Construye un paquete ARP Request válido"""
-    eth_header = struct.pack('!6s6sH',
-        b'\xff\xff\xff\xff\xff\xff',  # MAC destino (broadcast)
-        src_mac_raw,                  # MAC origen
-        0x0806                        # Tipo ARP
-    )
-
-    arp_payload = struct.pack('!HHBBH6s4s6s4s',
-        1,                          # Hardware type (Ethernet)
-        0x0800,                     # Protocol type (IPv4)
-        6,                          # MAC length
-        4,                          # IP length
-        1,                          # Operación (ARP Request)
-        src_mac_raw,                # Sender MAC
-        socket.inet_aton(src_ip),   # Sender IP
-        b'\x00'*6,                  # Target MAC (vacía)
-        socket.inet_aton(target_ip) # Target IP
-    )
-
-    return eth_header + arp_payload
-
 def check_duplicate_ip(interface, ip_addr):
     """
-    Verifica si la IP está duplicada en la red usando un método más confiable.
+    Verifica si la IP está duplicada en la red usando solo Python y ping.
     Retorna: (True si hay duplicado, mensaje de estado)
     """
     print(f"\n{Colors.YELLOW}Verificando si la IP {ip_addr} está en uso...{Colors.END}")
@@ -238,132 +248,41 @@ def check_duplicate_ip(interface, ip_addr):
     ip_clean = ip_addr.split('/')[0] if '/' in ip_addr else ip_addr
 
     try:
-        # Método 1: Usar 'arping' si está disponible (más confiable)
-        arping_available = subprocess.run(["which", "arping"], stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0
-        
-        if arping_available:
-            print(f"Usando arping para verificar {ip_clean}...")
-            # -c 2: envía 2 paquetes, -w 1: espera 1 segundo, -I: interfaz, -D: modo detección
-            cmd = ["arping", "-c", "2", "-w", "1", "-I", interface, "-D", ip_clean]
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            
-            # Si arping sale con 0, la IP está libre; si sale con 1, la IP está en uso
-            if result.returncode == 0:
-                return False, f"La IP {ip_clean} está libre para usar"
-            else:
-                # Buscar la MAC si es posible
-                mac_match = re.search(r"from ([0-9a-f:]{17})", result.stdout)
-                mac = mac_match.group(1) if mac_match else "desconocida"
-                return True, f"La IP {ip_clean} ya está en uso por el dispositivo con MAC {mac}"
-        
-        # Método 2: Intentar hacer un bind a la IP para verificar
+        # Método 1: Intentar hacer un bind a la IP para verificar
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.5)
-        
-        # Intentar hacer bind a la IP específica
+
         try:
             s.bind((ip_clean, 0))
             s.close()
-            # Si llegamos aquí, no hubo error, la IP está libre
-            return False, f"La IP {ip_clean} está libre para usar"
+            # Si hacemos bind sin error, la IP podría estar libre, pero aún necesitamos verificar si responde externamente
         except socket.error as e:
             if e.errno == 98:  # Address already in use
                 s.close()
                 return True, f"La IP {ip_clean} ya está en uso (comprobación de socket)"
-            else:
-                # Otro error, probablemente la IP no está en uso
-                s.close()
-                
-        # Método 3: Ping simple como última opción
+            s.close()
+
+        # Método 2: Ping simple como complemento
         ping_cmd = ["ping", "-c", "1", "-W", "1", ip_clean]
         ping_result = subprocess.run(ping_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         
         if ping_result.returncode == 0:
             return True, f"La IP {ip_clean} responde a ping, posiblemente en uso"
         
-        # Si llegamos aquí, todos los métodos indican que la IP está libre
+        # Si llegamos aquí, la IP parece estar libre
         return False, f"La IP {ip_clean} está libre para usar"
 
     except Exception as e:
         return False, f"Error verificando IP duplicada: {str(e)}"
 
-def test_connectivity_arp(interface, network, target_ip=None):
-    """
-    Prueba conectividad de capa 2 mediante ARP de forma más confiable.
-    """
-    print(f"\n{Colors.YELLOW}Probando conectividad ARP en {interface} ({network})...{Colors.END}")
-
-    try:
-        # Determinar IPs objetivo para las pruebas
-        targets = []
-        if target_ip:
-            targets = [target_ip]
-        else:
-            # Usar gateway como objetivo principal
-            gateway = subprocess.getoutput(f"ip route | grep default | grep {interface} | awk '{{print $3}}'").strip()
-            if gateway and network.overlaps(IPv4Network(f"{gateway}/32")):
-                targets.append(gateway)
-                print(f"Usando gateway {gateway} como objetivo para pruebas ARP")
-            else:
-                # Si no hay gateway, usar otros hosts en la red
-                all_hosts = list(network.hosts())
-                if len(all_hosts) > 2:  # Evitar redes muy pequeñas
-                    # Elegir algunos hosts para probar (evitar broadcast y network)
-                    targets = [str(host) for host in [all_hosts[1], all_hosts[-2]]]
-                else:
-                    return False, "Red demasiado pequeña para realizar pruebas ARP efectivas"
-        
-        # Usar arping para verificar conectividad ARP
-        arping_available = subprocess.run(["which", "arping"], stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0
-        
-        if arping_available:
-            success = False
-            responses = []
-            
-            for target in targets:
-                print(f"Probando ARP a {target}...")
-                cmd = ["arping", "-c", "3", "-w", "2", "-I", interface, target]
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                
-                # Buscar respuestas en la salida
-                if "Received" in result.stdout and not "0 packets received" in result.stdout:
-                    mac_match = re.search(r"from ([0-9a-f:]{17})", result.stdout)
-                    mac = mac_match.group(1) if mac_match else "desconocida"
-                    responses.append(f"{target} ({mac})")
-                    success = True
-            
-            if success:
-                return True, f"Conectividad ARP confirmada con: {', '.join(responses)}"
-            else:
-                # Intento secundario usando ping
-                for target in targets:
-                    ping_cmd = ["ping", "-c", "1", "-W", "1", target]
-                    ping_result = subprocess.run(ping_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    if ping_result.returncode == 0:
-                        return True, f"Conectividad confirmada mediante ping a {target}"
-                
-                return False, "No se recibió ninguna respuesta ARP. La red podría estar aislada."
-        else:
-            # Si no está disponible arping, usar ping como alternativa
-            for target in targets:
-                ping_cmd = ["ping", "-c", "2", "-W", "1", target]
-                ping_result = subprocess.run(ping_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                if ping_result.returncode == 0:
-                    return True, f"Conectividad confirmada mediante ping a {target}"
-            
-            return False, "No se pudo verificar la conectividad ARP (arping no disponible)"
-
-    except Exception as e:
-        return False, f"Error en prueba ARP: {str(e)}"
-
 def test_connectivity_icmp(target_ip, count=2, timeout=2):
     """
-    Prueba conectividad ICMP (ping) con un host específico de forma confiable.
+    Prueba conectividad ICMP (ping) con un host específico.
     """
     print(f"\n{Colors.YELLOW}Probando conectividad ICMP con {target_ip}...{Colors.END}")
 
     try:
-        # Usar el comando ping estándar (más confiable que sockets raw)
+        # Usar el comando ping estándar
         ping_cmd = ["ping", "-c", str(count), "-W", str(timeout), target_ip]
         ping_process = subprocess.run(ping_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
@@ -394,7 +313,6 @@ def test_connectivity_icmp(target_ip, count=2, timeout=2):
 def test_connectivity(config: dict, configured_interface=None, static_ip=None, gateway=None) -> tuple:
     """
     Verifica la conectividad usando la configuración proporcionada.
-    Versión mejorada para reducir falsos positivos.
     """
     # Pruebas de conectividad según modo
     if configured_interface and static_ip:
@@ -423,7 +341,7 @@ def test_connectivity(config: dict, configured_interface=None, static_ip=None, g
             if is_common_network:
                 is_duplicate, duplicate_msg = check_duplicate_ip(configured_interface, ip_addr)
                 
-                # Si detectamos que está en uso en una red inusual (como 192.168.255.0/24),
+                # Si detectamos que está en uso en una red inusual,
                 # podría ser un falso positivo
                 if is_duplicate and not any(ip_addr.startswith(prefix) for prefix in ["10.", "172.16.", "192.168.0.", "192.168.1."]):
                     print(f"{Colors.YELLOW}Posible falso positivo en la detección de IP duplicada. Se recomienda verificar manualmente.{Colors.END}")
@@ -431,6 +349,9 @@ def test_connectivity(config: dict, configured_interface=None, static_ip=None, g
                     if get_user_input("¿Desea ignorar esta advertencia y continuar? (s/n): ", lambda x: x.lower() in ['s', 'n']) == 's':
                         is_duplicate = False
                         duplicate_msg += " (ignorado por el usuario)"
+                    else:
+                        # Usuario no quiere continuar, retornar un código especial
+                        return -1, "El usuario decidió no continuar con la IP debido a posible duplicación"
             else:
                 duplicate_msg = "Verificación omitida en red no estándar"
 
@@ -441,7 +362,7 @@ def test_connectivity(config: dict, configured_interface=None, static_ip=None, g
             icmp_success, icmp_msg = False, "No se especificó gateway para pruebas ICMP"
             if gateway:
                 # Verificar si el gateway está en la misma red que la IP
-                gateway_ip = ipaddress.IPv4Address(gateway)  # Usar ipaddress.IPv4Address en lugar de IPv4Address
+                gateway_ip = ipaddress.IPv4Address(gateway)
                 if gateway_ip in network:
                     icmp_success, icmp_msg = test_connectivity_icmp(gateway)
                 else:
@@ -458,7 +379,7 @@ def test_connectivity(config: dict, configured_interface=None, static_ip=None, g
             # Consideramos exitosa la prueba si no hay IP duplicada
             # Si hay gateway y está en la misma red, requerimos que ICMP pase
             success = not is_duplicate
-            if gateway and ipaddress.IPv4Address(gateway) in network:  # Usar ipaddress.IPv4Address aquí también
+            if gateway and ipaddress.IPv4Address(gateway) in network:
                 success = success and icmp_success
 
             return success, "\n".join(messages)
@@ -492,7 +413,7 @@ def test_connectivity(config: dict, configured_interface=None, static_ip=None, g
                                 gateway = route["via"]
                                 icmp_success, icmp_msg = test_connectivity_icmp(gateway)
                                 test_results.append(f"ICMP a gateway {gateway}: {'✅ ' if icmp_success else '❌ '}{icmp_msg}")
-                                
+
                                 if icmp_success:
                                     # Si el gateway responde, intentar ping a 8.8.8.8 para verificar conectividad externa
                                     external_success, external_msg = test_connectivity_icmp("8.8.8.8", count=1)
@@ -537,13 +458,31 @@ def show_current_config():
     else:
         print(f"{Colors.YELLOW}No se encontró el archivo de configuración de Netplan.{Colors.END}")
 
+def is_command_available(command):
+    """Comprueba si un comando está disponible en el sistema."""
+    try:
+        subprocess.run(["which", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        return True
+    except subprocess.SubprocessError:
+        return False
+
 def restore_backup_config() -> bool:
     """Restaura la configuración de respaldo."""
     try:
         if BACKUP_FILE.exists():
             print("Restaurando configuración anterior...")
             NETPLAN_FILE.write_text(BACKUP_FILE.read_text())
-            subprocess.run(["netplan", "apply"], check=True)
+            
+            # Intentar aplicar la configuración
+            netplan_cmd = "/usr/sbin/netplan"
+            if os.path.exists(netplan_cmd):
+                subprocess.run([netplan_cmd, "apply"], check=True)
+            elif is_command_available("netplan"):
+                subprocess.run(["netplan", "apply"], check=True)
+            else:
+                print(f"{Colors.YELLOW}No se pudo encontrar el comando netplan. La configuración se ha restaurado pero no se ha aplicado.{Colors.END}")
+                return False
+                
             print(f"{Colors.GREEN}Configuración anterior restaurada con éxito.{Colors.END}")
             return True
         else:
@@ -553,6 +492,16 @@ def restore_backup_config() -> bool:
         print(f"{Colors.RED}Error al restaurar la configuración: {e}{Colors.END}")
         return False
 
+def apply_netplan_config():
+    """Aplica la configuración de netplan usando el comando disponible."""
+    netplan_cmd = "/usr/sbin/netplan"
+    if os.path.exists(netplan_cmd):
+        subprocess.run([netplan_cmd, "apply"], check=True)
+    elif is_command_available("netplan"):
+        subprocess.run(["netplan", "apply"], check=True)
+    else:
+        raise FileNotFoundError("No se pudo encontrar el comando netplan")
+
 def configure_network():
     print_header()
     print(f"{Colors.YELLOW}Configuración de Red{Colors.END}\n")
@@ -560,6 +509,9 @@ def configure_network():
     if os.geteuid() != 0:
         print(f"{Colors.RED}Este script debe ejecutarse con privilegios de superusuario (root).{Colors.END}")
         sys.exit(1)
+
+    # Crear directorio netplan si no existe
+    os.makedirs(NETPLAN_DIR, exist_ok=True)
 
     if get_user_input("¿Desea ver la configuración actual? (s/n): ", lambda x: x.lower() in ['s', 'n']) == 's':
         show_current_config()
@@ -596,7 +548,10 @@ def configure_network():
             print(f"{Colors.RED}No se configuró ninguna interfaz. Volviendo al menú principal.{Colors.END}")
             continue
 
-        # Prueba de conectividad si es configuración estática (antes de aplicar)
+        # Prueba de conectividad para cada interfaz con IP estática
+        interfaces_to_remove = []  # Lista para almacenar interfaces a eliminar
+        interfaces_to_reconfigure = []  # Lista para almacenar interfaces a reconfigurar
+        
         for iface_name, iface_config in config["network"]["ethernets"].items():
             if not iface_config.get("dhcp4", False) and "addresses" in iface_config:
                 static_ip = iface_config["addresses"][0]
@@ -608,17 +563,53 @@ def configure_network():
                             break
 
                 print(f"\n{Colors.YELLOW}Realizando pruebas de conectividad para {iface_name}...{Colors.END}")
-                conn_success, conn_msg = test_connectivity(config, iface_name, static_ip, gateway)
+                conn_result, conn_msg = test_connectivity(config, iface_name, static_ip, gateway)
+
+                # Código especial -1 indica que el usuario quiere reconfigurar debido a IP duplicada
+                if conn_result == -1:
+                    print(f"{Colors.YELLOW}Se necesita reconfigurar la IP para {iface_name}...{Colors.END}")
+                    interfaces_to_reconfigure.append(iface_name)
+                    continue
 
                 print(f"\n{Colors.CYAN}Resultado de las pruebas para {iface_name}:{Colors.END}")
                 print(conn_msg)
 
-                if not conn_success:
+                if not conn_result:
                     print(f"\n{Colors.YELLOW}Advertencia: Las pruebas de conectividad indican posibles problemas.{Colors.END}")
-                    if get_user_input("¿Desea continuar con esta configuración? (s/n): ", lambda x: x.lower() in ['s', 'n']) != 's':
-                        # Eliminar la configuración y volver a preguntar
-                        del config["network"]["ethernets"][iface_name]
-                        continue
+                    action = get_user_input("¿Qué desea hacer? (c=continuar, r=reconfigurar, d=descartar): ", lambda x: x.lower() in ['c', 'r', 'd'])
+                    if action == 'd':
+                        interfaces_to_remove.append(iface_name)
+                    elif action == 'r':
+                        interfaces_to_reconfigure.append(iface_name)
+
+        # Eliminar interfaces marcadas
+        for iface_name in interfaces_to_remove:
+            del config["network"]["ethernets"][iface_name]
+            print(f"{Colors.YELLOW}Configuración para {iface_name} descartada.{Colors.END}")
+        
+        # Reconfigurar interfaces marcadas
+        for iface_name in interfaces_to_reconfigure:
+            print(f"{Colors.CYAN}Reconfigurando interfaz {iface_name}...{Colors.END}")
+            iface_dict = next((i for i in interfaces_list if i["name"] == iface_name), None)
+            if iface_dict:
+                # Eliminar configuración actual
+                if iface_name in config["network"]["ethernets"]:
+                    del config["network"]["ethernets"][iface_name]
+                
+                # Solicitar nueva configuración
+                iface_config = configure_interface(iface_dict)
+                if iface_config:
+                    config["network"]["ethernets"][iface_name] = iface_config
+                    print(f"{Colors.GREEN}Interfaz {iface_name} reconfigurada correctamente.{Colors.END}")
+        
+        # Si hay interfaces para reconfigurar, volvemos al loop de verificación
+        if interfaces_to_reconfigure:
+            continue
+        
+        # Si se eliminaron todas las interfaces, volver al inicio
+        if not config["network"]["ethernets"]:
+            print(f"{Colors.RED}Todas las configuraciones fueron descartadas. Volviendo al menú principal.{Colors.END}")
+            continue
 
         # Mostrar configuración generada
         print(f"\n{Colors.CYAN}Configuración de Netplan generada:{Colors.END}")
@@ -669,7 +660,7 @@ def configure_network():
 
                 # Aplicar cambios
                 print(f"\n{Colors.CYAN}Aplicando nueva configuración...{Colors.END}")
-                subprocess.run(["netplan", "apply"], check=True)
+                apply_netplan_config()
 
                 # Verificación de conectividad después de aplicar
                 print(f"\n{Colors.YELLOW}Verificando conectividad con la configuración aplicada...{Colors.END}")
