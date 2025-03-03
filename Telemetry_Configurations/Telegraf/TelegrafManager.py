@@ -473,9 +473,12 @@ class TelegrafManager:
                         for idx in selected_indices:
                             if 1 <= idx <= len(interfaces):
                                 if_index, if_descr = interfaces[idx-1]
+                                # Sugerimos if_descr como valor por defecto, pero solo para mostrar en el prompt
                                 alias = input(f"Enter alias for interface '{if_descr}' (blank for '{if_descr}'): ").strip()
-                                alias = alias if alias else if_descr
-                                selected_interfaces.append((if_index, if_descr, alias))
+                                # Si no hay entrada, usamos if_descr como alias de la interfaz
+                                interface_alias = alias if alias else if_descr
+                                # Pero seguimos usando device_alias para la etiqueta device_alias
+                                selected_interfaces.append((if_index, if_descr, device_alias))
                             else:
                                 logger.warning(f"Invalid interface number: {idx}")
                                 
