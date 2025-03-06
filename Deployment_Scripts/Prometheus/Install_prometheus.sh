@@ -136,8 +136,7 @@ scrape_configs:
       module: [http_2xx]
     static_configs:
       - targets:
-        - https://ei.hmhospitales.com
-        - https://xero.hmhospitales.com
+        - https://google.com
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
