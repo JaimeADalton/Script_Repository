@@ -6,6 +6,7 @@ import argparse
 import logging
 import signal
 import configparser
+import subprocess
 from pathlib import Path
 try:
     import psutil
@@ -485,7 +486,7 @@ class TelegrafManager:
             break
 
     def delete_agent(self):
-        """Delete an SNMP agent configuration"""
+        """Delete an SNMP agent configuration and remove data from InfluxDB"""
         sites = self.list_sites()
 
         if not sites:
@@ -537,7 +538,33 @@ class TelegrafManager:
 
         if files_deleted:
             self.reload_telegraf()
-            logger.info("Agent deleted")
+            logger.info("Agent configuration deleted")
+
+            # Ask if user wants to delete data from InfluxDB
+            if self._prompt_yes_no("Delete agent data from InfluxDB?"):
+                try:
+                    # Build the InfluxDB query
+                    influx_query = f'DELETE FROM "{site}" WHERE "source" = \'{agent_ip}\''
+
+                    # Execute the command
+                    import subprocess
+                    cmd = ['influx', '-username', 'telegraf',
+                           '-password', 'j4l4B1n2011*',
+                           '-database', 'telegraf',
+                           '-execute', influx_query]
+
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+
+                    if result.returncode == 0:
+                        logger.info(f"Successfully deleted agent data from InfluxDB")
+                        if result.stdout:
+                            logger.debug(f"InfluxDB output: {result.stdout}")
+                    else:
+                        logger.error(f"Error deleting data from InfluxDB: {result.stderr}")
+                except Exception as e:
+                    logger.error(f"Exception when deleting from InfluxDB: {e}")
+
+            logger.info("Agent deletion completed")
         else:
             logger.info("No files found to delete")
 
