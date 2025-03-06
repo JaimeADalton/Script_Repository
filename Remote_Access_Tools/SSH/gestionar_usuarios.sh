@@ -6,7 +6,7 @@ readonly DEFAULT_USER_FILE="usernames.txt"
 readonly SSH_KEY_TYPE="ed25519"
 readonly SSH_KEY_ROUNDS=200
 readonly SSH_KEY_PREFIX="_srvbastionssh.key"
-readonly EXCEPTIONS="root daemon bin sys sync games man lp mail news uucp proxy www-data backup list irc gnats nobody _apt systemd-network systemd-resolve messagebus systemd-timesync pollinate sshd syslog uuidd tcpdump tss landscape usbmux lxd fwupd-refresh restricted"
+readonly MIN_UID_REGULAR=1000
 
 # Variables globales
 VERBOSE=0
@@ -66,12 +66,40 @@ validate_user_file() {
     fi
 }
 
-is_exception() {
+# Determina si un usuario es un usuario del sistema o un usuario regular
+is_system_user() {
     local username=$1
-    for ex in "${EXCEPTIONS[@]}"; do
-        [[ "$ex" == "$username" ]] && return 0
+    local uid
+    
+    # Obtener el UID del usuario
+    uid=$(id -u "$username" 2>/dev/null)
+    
+    # Si no podemos obtener el UID, asumimos que es un usuario del sistema para estar seguros
+    if [[ $? -ne 0 ]]; then
+        log ERROR "No se pudo obtener UID para $username, asumiendo como usuario del sistema por seguridad"
+        return 0
+    fi
+    
+    # Lista de nombres de usuarios del sistema que nunca deberían eliminarse
+    # Esta lista puede ampliarse según necesidades específicas
+    local system_users=("root" "nobody" "nfsnobody" "daemon" "bin" "sys" "sync" "games" "man" "lp" "mail" "news" "uucp" "proxy" "www-data" "backup" "list" "irc" "gnats" "systemd-network" "systemd-resolve" "messagebus" "sshd")
+    
+    # Comprobar si el usuario está en la lista de usuarios del sistema por nombre
+    for sys_user in "${system_users[@]}"; do
+        if [[ "$username" == "$sys_user" ]]; then
+            log DEBUG "Usuario del sistema protegido por nombre: $username"
+            return 0
+        fi
     done
-    return 1
+    
+    # Verificar por rango de UID:
+    # - UIDs bajos (< 1000): usuarios del sistema tradicionales
+    # - UIDs altos (≥ 65000): usuarios especiales como nobody
+    if [[ $uid -lt $MIN_UID_REGULAR || $uid -ge 65000 ]]; then
+        return 0  # Es un usuario del sistema
+    else
+        return 1  # Es un usuario regular
+    fi
 }
 
 convert_to_ppk() {
@@ -108,6 +136,11 @@ setup_ssh_keys() {
     local username=$1
     local ssh_dir="/home/$username/.ssh"
 
+    # Asegurarse de que el directorio .ssh existe
+    mkdir -p "$ssh_dir"
+    chmod 700 "$ssh_dir"
+    chown "$username:$username" "$ssh_dir"
+
     if [[ $FORCE_ALL -eq 1 || "$FORCE_USER" == "$username" ]]; then
         rm -f "$ssh_dir/${username}${SSH_KEY_PREFIX}" "$ssh_dir/${username}${SSH_KEY_PREFIX}.pub"
     elif [[ -f "$ssh_dir/${username}${SSH_KEY_PREFIX}" ]]; then
@@ -142,7 +175,20 @@ create_user() {
 
 delete_user() {
     local username=$1
-    log INFO "Eliminando usuario: $username"
+    
+    # PROTECCIÓN IMPORTANTE: No eliminar usuarios del sistema
+    if is_system_user "$username"; then
+        log DEBUG "Protegiendo usuario del sistema: $username"
+        return 0
+    fi
+    
+    # PROTECCIÓN ADICIONAL: No eliminar el usuario actual que ejecuta el script
+    if [[ "$username" == "$(whoami)" ]]; then
+        log ERROR "¡PROTECCIÓN! No se puede eliminar el usuario actual ($username)"
+        return 1
+    fi  # Corregido: Se eliminó el cierre de llave incorrecto
+    
+    log INFO "Eliminando usuario regular: $username"
     if userdel -r "$username" 2>/dev/null; then
         log INFO "Usuario $username eliminado exitosamente"
     else
@@ -165,11 +211,21 @@ cleanup_users() {
     # Prepara un listado limpio de usuarios a partir del archivo
     sed -e 's/#.*//' -e 's/ //g' "$USER_FILE" | grep -v '^$' > "$tmpfile"
 
+    log INFO "Iniciando verificación de usuarios que no están en $USER_FILE"
+    
     while IFS=: read -r username _; do
-        if ! grep -Fxq "$username" "$tmpfile" && ! is_exception "$username"; then
-            delete_user "$username"
+        # Verificar cada usuario
+        if ! grep -Fxq "$username" "$tmpfile"; then
+            # Si es un usuario del sistema, NUNCA intentar eliminarlo
+            if is_system_user "$username"; then
+                log DEBUG "Omitiendo usuario del sistema: $username (UID < $MIN_UID_REGULAR)"
+            else
+                # El usuario es regular y no está en la lista, eliminarlo
+                delete_user "$username"
+            fi
         fi
     done < /etc/passwd
+    
     rm "$tmpfile"
 }
 
@@ -177,6 +233,14 @@ main() {
     check_root
     check_dependencies
     validate_user_file
+    
+    # Verificación de seguridad - comprobar que is_system_user detecta correctamente root
+    if ! is_system_user "root"; then
+        log ERROR "FALLO CRÍTICO: La protección de usuarios del sistema no funciona."
+        log ERROR "El script se detendrá para evitar daños al sistema."
+        exit 1
+    fi
+    log INFO "Verificación de seguridad completada correctamente."
 
     # Si se activa --force-all, se fuerza la regeneración para todos los usuarios
     if [[ $FORCE_ALL -eq 1 ]]; then
