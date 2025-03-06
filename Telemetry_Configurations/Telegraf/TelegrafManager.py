@@ -525,6 +525,20 @@ class TelegrafManager:
         config_path = os.path.join(self.config['telegraf_dir'], site, f"snmp_{agent_ip}.conf")
         icmp_path = os.path.join(self.config['telegraf_dir'], site, f"icmp_{agent_ip}.conf")
 
+        # Determine the actual measurement name from the config file
+        measurement_name = site  # Default to site name
+        try:
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config_content = f.read()
+                    # Look for the measurement name in the config
+                    name_match = re.search(r'name\s*=\s*"([^"]+)"', config_content)
+                    if name_match:
+                        measurement_name = name_match.group(1)
+                        logger.debug(f"Found measurement name in config: {measurement_name}")
+        except Exception as e:
+            logger.error(f"Error reading config to determine measurement name: {e}")
+
         files_deleted = []
         for path in [config_path, icmp_path]:
             if os.path.exists(path):
@@ -543,8 +557,9 @@ class TelegrafManager:
             # Ask if user wants to delete data from InfluxDB
             if self._prompt_yes_no("Delete agent data from InfluxDB?"):
                 try:
-                    # Build the InfluxDB query
-                    influx_query = f'DELETE FROM "{site}" WHERE "source" = \'{agent_ip}\''
+                    # Build the InfluxDB query using the correct measurement name
+                    influx_query = f'DELETE FROM "{measurement_name}" WHERE "source" = \'{agent_ip}\''
+                    logger.debug(f"InfluxDB query: {influx_query}")
 
                     # Execute the command
                     import subprocess
@@ -567,6 +582,7 @@ class TelegrafManager:
             logger.info("Agent deletion completed")
         else:
             logger.info("No files found to delete")
+
 
 def create_default_config(config_path):
     """Create a default configuration file"""
