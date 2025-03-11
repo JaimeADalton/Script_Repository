@@ -46,7 +46,7 @@ class TelegrafManager:
 
         # Initialize MIBs
         self.mib_view_controller = self._setup_mibs()
-        
+
         # Get telegraf user and group IDs
         try:
             self.telegraf_uid = pwd.getpwnam('telegraf').pw_uid
@@ -116,7 +116,7 @@ class TelegrafManager:
     def _sanitize_name(self, name):
         """Sanitize input to prevent path traversal"""
         return re.sub(r'[^\w\-\.]', '_', name)
-    
+
     def _set_proper_permissions(self, path, is_directory=False):
         """Set appropriate permissions and ownership for files and directories"""
         try:
@@ -124,7 +124,7 @@ class TelegrafManager:
                 os.chmod(path, 0o755)  # rwxr-xr-x for directories
             else:
                 os.chmod(path, 0o644)  # rw-r--r-- for files
-            
+
             # Set telegraf user and group ownership
             os.chown(path, self.telegraf_uid, self.telegraf_gid)
             logger.debug(f"Set permissions for {path}: {'755' if is_directory else '644'} telegraf:telegraf")
@@ -633,16 +633,16 @@ def create_default_config(config_path):
     # Create the file with proper permissions
     with open(config_path, 'w') as f:
         config.write(f)
-    
+
     try:
         # Get telegraf user and group IDs
         telegraf_uid = pwd.getpwnam('telegraf').pw_uid
         telegraf_gid = grp.getgrnam('telegraf').gr_gid
-        
+
         # Set proper permissions and ownership
         os.chmod(config_path, 0o644)  # rw-r--r--
         os.chown(config_path, telegraf_uid, telegraf_gid)
-        
+
         logger.info(f"Default configuration created at {config_path} with permissions 644 for telegraf:telegraf")
     except KeyError:
         logger.warning("Telegraf user or group not found. Configuration file created, but with default permissions.")
