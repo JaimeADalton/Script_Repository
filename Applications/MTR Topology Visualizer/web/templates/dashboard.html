@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="MTR Topology Visualizer - Dashboard">
+    <title>Dashboard - MTR Topology Visualizer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}" type="image/x-icon">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <div class="header-title">
+                <h1>MTR Dashboard</h1>
+            </div>
+            
+            <div class="controls">
+                <div class="control-group">
+                    <label for="time-range">Time Range:</label>
+                    <select id="time-range">
+                        <option value="1h">Last Hour</option>
+                        <option value="6h">Last 6 Hours</option>
+                        <option value="24h" selected>Last 24 Hours</option>
+                        <option value="7d">Last 7 Days</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="dashboard-group">Group:</label>
+                    <select id="dashboard-group">
+                        <option value="all">All Groups</option>
+                        <!-- Will be populated dynamically -->
+                    </select>
+                </div>
+                
+                <button id="dashboard-refresh-btn" class="button">
+                    <span class="icon">⟳</span> Refresh
+                </button>
+            </div>
+        </header>
+        
+        <main>
+            <div id="error-message" class="error-message"></div>
+            
+            <div class="dashboard-grid">
+                <div class="dashboard-card summary-card">
+                    <h2>Summary</h2>
+                    <div id="summary-content" class="card-content">
+                        <div class="summary-stat">
+                            <span class="stat-label">Total Agents:</span>
+                            <span class="stat-value" id="total-agents">--</span>
+                        </div>
+                        <div class="summary-stat">
+                            <span class="stat-label">Active Agents:</span>
+                            <span class="stat-value" id="active-agents">--</span>
+                        </div>
+                        <div class="summary-stat">
+                            <span class="stat-label">Problem Agents:</span>
+                            <span class="stat-value" id="problem-agents">--</span>
+                        </div>
+                        <div class="summary-stat">
+                            <span class="stat-label">Average Latency:</span>
+                            <span class="stat-value" id="avg-latency">--</span>
+                        </div>
+                        <div class="summary-stat">
+                            <span class="stat-label">Average Packet Loss:</span>
+                            <span class="stat-value" id="avg-loss">--</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-card">
+                    <h2>Latency Overview</h2>
+                    <div class="card-content">
+                        <svg id="latency-chart" class="dashboard-chart"></svg>
+                    </div>
+                </div>
+                
+                <div class="dashboard-card">
+                    <h2>Packet Loss Overview</h2>
+                    <div class="card-content">
+                        <svg id="loss-chart" class="dashboard-chart"></svg>
+                    </div>
+                </div>
+                
+                <div class="dashboard-card full-width">
+                    <h2>Agent Status</h2>
+                    <div class="card-content">
+                        <div class="table-container">
+                            <table id="agents-status-table" class="status-table">
+                                <thead>
+                                    <tr>
+                                        <th>Agent</th>
+                                        <th>Group</th>
+                                        <th>Status</th>
+                                        <th>Current Latency</th>
+                                        <th>Avg Latency</th>
+                                        <th>Packet Loss</th>
+                                        <th>Last Update</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Will be populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-card full-width">
+                    <h2>Recent Topology Changes</h2>
+                    <div class="card-content">
+                        <div id="topology-history">
+                            <div class="timeline">
+                                <!-- Will be populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <footer>
+            <div class="footer-content">
+                <p>MTR Topology Visualizer v1.0</p>
+                <nav class="footer-nav">
+                    <a href="/">Topology</a>
+                    <a href="/dashboard" class="active">Dashboard</a>
+                    <a href="/about">About</a>
+                </nav>
+            </div>
+        </footer>
+    </div>
+    
+    <!-- Import scripts -->
+    <script src="{{ url_for('static', filename='js/d3.v7.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
