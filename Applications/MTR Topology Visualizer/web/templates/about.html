@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="MTR Topology Visualizer - About">
+    <title>About - MTR Topology Visualizer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}" type="image/x-icon">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <div class="header-title">
+                <h1>About MTR Topology Visualizer</h1>
+            </div>
+        </header>
+        
+        <main>
+            <div class="about-container">
+                <section class="about-section">
+                    <h2>Overview</h2>
+                    <p>
+                        MTR Topology Visualizer is a powerful tool for visualizing network topology and monitoring network 
+                        performance. It combines the functionality of traceroute and ping, creating a comprehensive view of your 
+                        network's structure and health.
+                    </p>
+                    <p>
+                        The tool uses MTR (My TraceRoute) to trace the path between your server and various network endpoints, 
+                        collecting data about each hop along the way. This data is then visualized in an interactive graph, 
+                        allowing you to quickly identify bottlenecks, latency issues, and packet loss.
+                    </p>
+                </section>
+                
+                <section class="about-section">
+                    <h2>Features</h2>
+                    <ul>
+                        <li><strong>Interactive Topology Graph:</strong> Visualize your network topology with an intuitive, 
+                        interactive D3.js graph. Nodes represent network devices, and links show connections between them.</li>
+                        
+                        <li><strong>Real-time Monitoring:</strong> Monitor network performance in real-time with auto-refresh 
+                        capabilities that update the topology graph at configurable intervals.</li>
+                        
+                        <li><strong>Agent Management:</strong> Easily add, remove, enable, or disable monitoring agents through 
+                        the web interface.</li>
+                        
+                        <li><strong>Telegraf Integration:</strong> Automatically discover network endpoints from your Telegraf 
+                        configuration files.</li>
+                        
+                        <li><strong>Filtering and Grouping:</strong> Filter the topology view by group or agent to focus on 
+                        specific parts of your network.</li>
+                        
+                        <li><strong>Performance Metrics:</strong> View detailed performance metrics including latency and packet 
+                        loss for each network segment.</li>
+                        
+                        <li><strong>Dashboard:</strong> Access a comprehensive dashboard with historical performance data and 
+                        network statistics.</li>
+                    </ul>
+                </section>
+                
+                <section class="about-section">
+                    <h2>How It Works</h2>
+                    <p>
+                        MTR Topology Visualizer works by sending ICMP packets to target destinations with incrementing TTL 
+                        (Time To Live) values. This allows the tool to map the entire path from source to destination, recording 
+                        information about each router along the way.
+                    </p>
+                    <p>
+                        The application consists of three main components:
+                    </p>
+                    <ol>
+                        <li><strong>Core MTR Engine:</strong> Handles the sending and receiving of ICMP packets, calculating 
+                        statistics, and building topology data.</li>
+                        
+                        <li><strong>Storage Layer:</strong> Persists configuration and topology data in an SQLite database, 
+                        allowing for historical analysis.</li>
+                        
+                        <li><strong>Web Interface:</strong> Provides an intuitive user interface for visualizing topology data 
+                        and managing agents.</li>
+                    </ol>
+                </section>
+                
+                <section class="about-section">
+                    <h2>System Requirements</h2>
+                    <ul>
+                        <li>Linux-based operating system</li>
+                        <li>Python 3.6 or higher</li>
+                        <li>Root privileges (required for raw socket operations)</li>
+                        <li>Modern web browser (Chrome, Firefox, Safari, Edge)</li>
+                    </ul>
+                </section>
+                
+                <section class="about-section">
+                    <h2>Technical Information</h2>
+                    <table class="info-table">
+                        <tr>
+                            <th>Component</th>
+                            <th>Technology</th>
+                        </tr>
+                        <tr>
+                            <td>Backend</td>
+                            <td>Python, Flask</td>
+                        </tr>
+                        <tr>
+                            <td>Frontend</td>
+                            <td>HTML5, CSS3, JavaScript, D3.js</td>
+                        </tr>
+                        <tr>
+                            <td>Database</td>
+                            <td>SQLite</td>
+                        </tr>
+                        <tr>
+                            <td>Network Probing</td>
+                            <td>ICMP (Raw Sockets)</td>
+                        </tr>
+                    </table>
+                </section>
+            </div>
+        </main>
+        
+        <footer>
+            <div class="footer-content">
+                <p>MTR Topology Visualizer v1.0</p>
+                <nav class="footer-nav">
+                    <a href="/">Topology</a>
+                    <a href="/dashboard">Dashboard</a>
+                    <a href="/about" class="active">About</a>
+                </nav>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
