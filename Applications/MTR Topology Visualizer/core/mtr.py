@@ -4,9 +4,13 @@ import random
 import socket
 import threading
 import collections
+import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from .icmp import send_discover_icmp, ICMPReturn
+from .icmp import send_discover_icmp, ICMPReturn, get_ip_version
+
+# Configurar logging
+logger = logging.getLogger(__name__)
 
 class HopStatistic:
     """Estadísticas para un salto particular en una ruta."""
@@ -25,58 +29,64 @@ class HopStatistic:
         self.packets = collections.deque(maxlen=ring_buffer_size)
         self.dest = None
         self.pid = 0
+        self.mutex = threading.RLock()  # Para operaciones thread-safe
     
     def update(self, icmp_return):
         """Actualiza las estadísticas con un nuevo resultado ICMP."""
-        self.last = icmp_return
-        self.sent += 1
-        
-        # Actualizar lista de targets
-        if icmp_return.addr and icmp_return.addr not in self.targets:
-            self.targets.append(icmp_return.addr)
-        
-        # Añadir al buffer circular
-        self.packets.append(icmp_return)
-        
-        if not icmp_return.success:
-            self.lost += 1
-            return
-        
-        # Actualizar estadísticas solo para paquetes exitosos
-        self.sum_elapsed += icmp_return.elapsed
-        
-        if not self.best.success or self.best.elapsed > icmp_return.elapsed:
-            self.best = icmp_return
-        
-        if self.worst.elapsed < icmp_return.elapsed:
-            self.worst = icmp_return
+        with self.mutex:
+            self.last = icmp_return
+            self.sent += 1
+            
+            # Actualizar lista de targets
+            if icmp_return.addr and icmp_return.addr not in self.targets:
+                self.targets.append(icmp_return.addr)
+            
+            # Añadir al buffer circular
+            self.packets.append(icmp_return)
+            
+            if not icmp_return.success:
+                self.lost += 1
+                return
+            
+            # Actualizar estadísticas solo para paquetes exitosos
+            self.sum_elapsed += icmp_return.elapsed
+            
+            if not self.best.success or self.best.elapsed > icmp_return.elapsed:
+                self.best = icmp_return
+            
+            if self.worst.elapsed < icmp_return.elapsed:
+                self.worst = icmp_return
     
     def loss_percent(self):
         """Retorna el porcentaje de paquetes perdidos."""
-        if self.sent == 0:
-            return 0
-        return (self.lost / self.sent) * 100
+        with self.mutex:
+            if self.sent == 0:
+                return 0
+            return (self.lost / self.sent) * 100
     
     def avg_ms(self):
         """Retorna la latencia promedio en milisegundos."""
-        if self.sent - self.lost == 0:
-            return 0
-        return (self.sum_elapsed / (self.sent - self.lost)) * 1000
+        with self.mutex:
+            successful_packets = self.sent - self.lost
+            if successful_packets == 0:
+                return 0
+            return (self.sum_elapsed / successful_packets) * 1000
     
     def to_dict(self):
         """Convierte las estadísticas a un diccionario."""
-        return {
-            'ttl': self.ttl,
-            'target': self.targets,
-            'sent': self.sent,
-            'loss_percent': self.loss_percent(),
-            'last_ms': self.last.elapsed * 1000 if self.last.success else None,
-            'avg_ms': self.avg_ms(),
-            'best_ms': self.best.elapsed * 1000 if self.best.success else None,
-            'worst_ms': self.worst.elapsed * 1000 if self.worst.success else None,
-            'packets': [{'success': p.success, 'elapsed_ms': p.elapsed * 1000 if p.success else None} 
-                      for p in self.packets]
-        }
+        with self.mutex:
+            return {
+                'ttl': self.ttl,
+                'target': self.targets.copy(),  # Crear copia para evitar modificaciones externas
+                'sent': self.sent,
+                'loss_percent': self.loss_percent(),
+                'last_ms': self.last.elapsed * 1000 if self.last.success else None,
+                'avg_ms': self.avg_ms(),
+                'best_ms': self.best.elapsed * 1000 if self.best.success else None,
+                'worst_ms': self.worst.elapsed * 1000 if self.worst.success else None,
+                'packets': [{'success': p.success, 'elapsed_ms': p.elapsed * 1000 if p.success else None} 
+                          for p in self.packets]
+            }
 
 class MTR:
     """Implementación del tracer MTR (combinación de traceroute y ping)."""
@@ -99,15 +109,24 @@ class MTR:
             ptr_lookup: Si se debe realizar resolución DNS inversa
         """
         # Resolución de nombres si es necesario
-        if not socket.inet_aton(address):
+        try:
+            socket.inet_aton(address)
+            self.is_ipv6 = False
+        except socket.error:
             try:
-                address = socket.gethostbyname(address)
-            except socket.gaierror:
-                raise ValueError(f"No se puede resolver el host: {address}")
+                socket.inet_pton(socket.AF_INET6, address)
+                self.is_ipv6 = True
+            except socket.error:
+                # Es un hostname
+                try:
+                    address = socket.gethostbyname(address)
+                    self.is_ipv6 = False
+                except socket.gaierror:
+                    raise ValueError(f"No se puede resolver el host: {address}")
         
         # IP de origen predeterminada si no se proporciona
         if not src_address:
-            src_address = "0.0.0.0"
+            src_address = "0.0.0.0" if not self.is_ipv6 else "::"
         
         self.src_address = src_address
         self.address = address
@@ -122,12 +141,25 @@ class MTR:
         self.statistics = {}  # ttl -> HopStatistic
         self.mutex = threading.RLock()
         self.stop_event = threading.Event()
+        
+        # Inicializar locks granulares para cada TTL
+        self.ttl_locks = {}
+    
+    def get_ttl_lock(self, ttl):
+        """Obtiene un lock específico para un TTL dado."""
+        with self.mutex:
+            if ttl not in self.ttl_locks:
+                self.ttl_locks[ttl] = threading.RLock()
+            return self.ttl_locks[ttl]
     
     def register_statistic(self, ttl, icmp_return):
         """Registra una nueva estadística para un salto."""
-        with self.mutex:
-            if ttl not in self.statistics:
-                self.statistics[ttl] = HopStatistic(ttl, self.timeout, self.ring_buffer_size)
+        ttl_lock = self.get_ttl_lock(ttl)
+        
+        with ttl_lock:
+            with self.mutex:
+                if ttl not in self.statistics:
+                    self.statistics[ttl] = HopStatistic(ttl, self.timeout, self.ring_buffer_size)
             
             s = self.statistics[ttl]
             s.update(icmp_return)
@@ -152,6 +184,8 @@ class MTR:
             time.sleep(self.interval)
             
             unknown_hops_count = 0
+            consecutive_unknown_hops = 0
+            
             for ttl in range(1, self.max_hops + 1):
                 if self.stop_event.is_set():
                     break
@@ -169,7 +203,10 @@ class MTR:
                 
                 # Notificar actualización
                 if callback:
-                    callback(ttl, s)
+                    try:
+                        callback(ttl, s)
+                    except Exception as e:
+                        logger.error(f"Error en callback para TTL {ttl}: {e}")
                 
                 # Si llegamos al destino, terminar
                 if icmp_return.addr == self.address:
@@ -178,14 +215,17 @@ class MTR:
                 # Gestionar saltos desconocidos
                 if not icmp_return.success:
                     unknown_hops_count += 1
-                    if unknown_hops_count >= self.max_unknown_hops:
+                    consecutive_unknown_hops += 1
+                    if consecutive_unknown_hops >= self.max_unknown_hops:
+                        logger.info(f"Alcanzado máximo de saltos desconocidos consecutivos ({self.max_unknown_hops})")
                         break
                     continue
                 
-                unknown_hops_count = 0
+                consecutive_unknown_hops = 0
     
     def run(self, count=10, callback=None):
         """Ejecuta el MTR en un hilo separado."""
+        self.stop_event.clear()  # Asegurarse de que el evento esté limpio
         thread = threading.Thread(target=self.discover, args=(count, callback))
         thread.daemon = True
         thread.start()
@@ -194,6 +234,7 @@ class MTR:
     def stop(self):
         """Detiene el MTR en ejecución."""
         self.stop_event.set()
+        logger.info(f"Deteniendo MTR para {self.address}")
     
     def get_statistics(self):
         """Retorna todas las estadísticas actuales."""
@@ -228,51 +269,124 @@ class MTRManager:
         """
         self.mtrs = {}  # address -> MTR
         self.mutex = threading.RLock()
+        self.address_locks = {}  # Un lock para cada dirección
         self.max_concurrent = max_concurrent
         self.mtr_options = mtr_options
         self.executor = ThreadPoolExecutor(max_workers=max_concurrent)
+        self.futures = {}  # Para hacer seguimiento de futures en ejecución
+        self.stop_event = threading.Event()
+    
+    def get_address_lock(self, address):
+        """Obtiene un lock específico para una dirección."""
+        with self.mutex:
+            if address not in self.address_locks:
+                self.address_locks[address] = threading.RLock()
+            return self.address_locks[address]
     
     def add_target(self, address, callback=None):
         """Añade un nuevo destino para monitorear."""
-        with self.mutex:
-            if address in self.mtrs:
-                return False
+        address_lock = self.get_address_lock(address)
+        
+        with address_lock:
+            with self.mutex:
+                if address in self.mtrs:
+                    logger.info(f"El destino {address} ya está siendo monitoreado")
+                    return False
+                
+                # Verificar que no excedamos el máximo de MTRs concurrentes
+                if len(self.mtrs) >= self.max_concurrent:
+                    logger.warning(f"Máximo de MTRs concurrentes alcanzado ({self.max_concurrent})")
+                    return False
             
             try:
+                # Validar dirección IP
+                try:
+                    version = get_ip_version(address)
+                    if not version:
+                        # Intentar resolución DNS
+                        try:
+                            address = socket.gethostbyname(address)
+                        except socket.gaierror:
+                            logger.error(f"No se puede resolver la dirección: {address}")
+                            return False
+                except Exception as e:
+                    logger.error(f"Error validando dirección IP {address}: {e}")
+                    return False
+                
                 mtr = MTR(address, **self.mtr_options)
-                self.mtrs[address] = mtr
+                
+                with self.mutex:
+                    self.mtrs[address] = mtr
                 
                 # Ejecutar MTR en segundo plano
                 future = self.executor.submit(mtr.discover, 1, callback)
-                future.add_done_callback(lambda f: self._handle_completion(address, f))
                 
+                with self.mutex:
+                    self.futures[address] = future
+                
+                future.add_done_callback(lambda f, addr=address: self._handle_completion(addr, f))
+                
+                logger.info(f"Añadido destino {address} para monitoreo")
                 return True
             except Exception as e:
-                print(f"Error al añadir destino {address}: {e}")
+                logger.error(f"Error al añadir destino {address}: {e}")
                 return False
     
     def _handle_completion(self, address, future):
         """Maneja la finalización de un MTR."""
-        try:
-            future.result()  # Obtener resultado o excepción
-        except Exception as e:
-            print(f"Error en MTR para {address}: {e}")
+        address_lock = self.get_address_lock(address)
+        
+        with address_lock:
+            try:
+                # Obtener resultado o excepción
+                future.result()
+                logger.debug(f"MTR para {address} completado correctamente")
+            except Exception as e:
+                logger.error(f"Error en MTR para {address}: {e}")
+            
+            # Eliminar future completado
+            with self.mutex:
+                if address in self.futures:
+                    del self.futures[address]
     
     def remove_target(self, address):
         """Elimina un destino del monitoreo."""
-        with self.mutex:
-            if address not in self.mtrs:
-                return False
+        address_lock = self.get_address_lock(address)
+        
+        with address_lock:
+            with self.mutex:
+                if address not in self.mtrs:
+                    logger.warning(f"El destino {address} no está siendo monitoreado")
+                    return False
+                
+                mtr = self.mtrs[address]
             
-            mtr = self.mtrs[address]
+            # Detener MTR
             mtr.stop()
-            del self.mtrs[address]
+            
+            # Cancelar future si existe
+            with self.mutex:
+                if address in self.futures:
+                    future = self.futures[address]
+                    future.cancel()
+                    del self.futures[address]
+                
+                del self.mtrs[address]
+            
+            logger.info(f"Eliminado destino {address} del monitoreo")
             return True
     
     def get_all_routes(self):
         """Obtiene todas las rutas de todos los destinos."""
         with self.mutex:
-            return {addr: mtr.get_route() for addr, mtr in self.mtrs.items()}
+            result = {}
+            for addr, mtr in self.mtrs.items():
+                try:
+                    result[addr] = mtr.get_route()
+                except Exception as e:
+                    logger.error(f"Error al obtener ruta para {addr}: {e}")
+                    result[addr] = []
+            return result
     
     def get_topology_data(self):
         """
@@ -293,69 +407,77 @@ class MTRManager:
             
             # Procesar cada MTR
             for addr, mtr in self.mtrs.items():
-                stats = mtr.get_statistics()
-                
-                # Añadir nodo de destino
-                nodes[addr] = {
-                    'id': addr,
-                    'name': addr,
-                    'ip': addr,
-                    'type': "destination"
-                }
-                
-                prev_hop = "local"
-                for ttl in sorted(stats.keys()):
-                    stat = stats[ttl]
+                try:
+                    stats = mtr.get_statistics()
                     
-                    # Saltarse los hops sin respuesta
-                    if not stat['target'] or len(stat['target']) == 0:
-                        continue
+                    # Añadir nodo de destino
+                    nodes[addr] = {
+                        'id': addr,
+                        'name': addr,
+                        'ip': addr,
+                        'type': "destination"
+                    }
                     
-                    # Usar el primer target como representativo
-                    target = stat['target'][0]
-                    hop_id = f"hop_{target.replace('.', '_')}"
+                    prev_hop = "local"
+                    for ttl in sorted(stats.keys()):
+                        stat = stats[ttl]
+                        
+                        # Saltarse los hops sin respuesta
+                        if not stat['target'] or len(stat['target']) == 0:
+                            continue
+                        
+                        # Usar el primer target como representativo
+                        target = stat['target'][0]
+                        hop_id = f"hop_{target.replace('.', '_').replace(':', '_')}"
+                        
+                        # Añadir nodo para este hop si no existe
+                        if hop_id not in nodes:
+                            nodes[hop_id] = {
+                                'id': hop_id,
+                                'name': target,
+                                'ip': target,
+                                'type': "router"
+                            }
+                        
+                        # Crear enlace para este hop
+                        link_id = f"{prev_hop}-{hop_id}"
+                        if link_id not in links:
+                            links[link_id] = {
+                                'id': link_id,
+                                'source': prev_hop,
+                                'target': hop_id,
+                                'destinations': [addr],
+                                'latency': stat['avg_ms'],
+                                'loss': stat['loss_percent']
+                            }
+                        else:
+                            # Actualizar enlace existente
+                            if addr not in links[link_id]['destinations']:
+                                links[link_id]['destinations'].append(addr)
+                            
+                            # Calcular promedios ponderados para latencia y pérdida
+                            dest_count = len(links[link_id]['destinations'])
+                            current = links[link_id]['latency'] * (dest_count - 1)
+                            links[link_id]['latency'] = (current + stat['avg_ms']) / dest_count
+                            
+                            current = links[link_id]['loss'] * (dest_count - 1)
+                            links[link_id]['loss'] = (current + stat['loss_percent']) / dest_count
+                        
+                        prev_hop = hop_id
                     
-                    # Añadir nodo para este hop si no existe
-                    if hop_id not in nodes:
-                        nodes[hop_id] = {
-                            'id': hop_id,
-                            'name': target,
-                            'ip': target,
-                            'type': "router"
-                        }
-                    
-                    # Crear enlace para este hop
-                    link_id = f"{prev_hop}-{hop_id}"
-                    if link_id not in links:
+                    # Enlace final al destino
+                    link_id = f"{prev_hop}-{addr}"
+                    if prev_hop != "local":  # Evitar enlace directo si solo hay un salto
                         links[link_id] = {
                             'id': link_id,
                             'source': prev_hop,
-                            'target': hop_id,
+                            'target': addr,
                             'destinations': [addr],
-                            'latency': stat['avg_ms'],
-                            'loss': stat['loss_percent']
+                            'latency': stats[max(stats.keys())]['avg_ms'],
+                            'loss': stats[max(stats.keys())]['loss_percent']
                         }
-                    else:
-                        # Actualizar enlace existente
-                        if addr not in links[link_id]['destinations']:
-                            links[link_id]['destinations'].append(addr)
-                        # Promediar latencia y pérdida
-                        links[link_id]['latency'] = (links[link_id]['latency'] + stat['avg_ms']) / 2
-                        links[link_id]['loss'] = (links[link_id]['loss'] + stat['loss_percent']) / 2
-                    
-                    prev_hop = hop_id
-                
-                # Enlace final al destino
-                link_id = f"{prev_hop}-{addr}"
-                if prev_hop != "local":  # Evitar enlace directo si solo hay un salto
-                    links[link_id] = {
-                        'id': link_id,
-                        'source': prev_hop,
-                        'target': addr,
-                        'destinations': [addr],
-                        'latency': stats[max(stats.keys())]['avg_ms'],
-                        'loss': stats[max(stats.keys())]['loss_percent']
-                    }
+                except Exception as e:
+                    logger.error(f"Error procesando topología para {addr}: {e}")
             
             return {
                 'nodes': list(nodes.values()),
@@ -364,17 +486,63 @@ class MTRManager:
     
     def scan_all(self, count=1, callback=None):
         """Escanea todos los destinos actualmente monitoreados."""
+        if self.stop_event.is_set():
+            logger.warning("No se puede ejecutar scan_all: el gestor está siendo detenido")
+            return
+        
         futures = []
         
         with self.mutex:
-            for addr, mtr in self.mtrs.items():
-                future = self.executor.submit(mtr.discover, count, callback)
-                futures.append(future)
+            addresses = list(self.mtrs.keys())
         
-        # Esperar a que todos terminen
-        for future in futures:
+        for addr in addresses:
+            address_lock = self.get_address_lock(addr)
+            
+            with address_lock:
+                with self.mutex:
+                    if addr not in self.mtrs:
+                        continue
+                    mtr = self.mtrs[addr]
+                
+                try:
+                    future = self.executor.submit(mtr.discover, count, callback)
+                    futures.append(future)
+                except Exception as e:
+                    logger.error(f"Error al programar escaneo para {addr}: {e}")
+        
+        # Esperar a que todos terminen si es necesario
+        if futures:
+            for future in futures:
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"Error en escaneo: {e}")
+    
+    def shutdown(self):
+        """Detiene todos los MTRs y libera recursos."""
+        logger.info("Iniciando cierre del MTRManager...")
+        self.stop_event.set()
+        
+        # Detener todos los MTRs
+        with self.mutex:
+            addresses = list(self.mtrs.keys())
+        
+        for addr in addresses:
             try:
-                future.result()
+                self.remove_target(addr)
             except Exception as e:
-                print(f"Error en escaneo: {e}")
-
+                logger.error(f"Error al detener MTR para {addr}: {e}")
+        
+        # Esperar a que todos los futuros terminen
+        with self.mutex:
+            futures_copy = list(self.futures.values())
+        
+        for future in futures_copy:
+            try:
+                future.cancel()
+            except Exception:
+                pass
+        
+        # Apagar el executor
+        self.executor.shutdown(wait=True)
+        logger.info("MTRManager cerrado correctamente")
