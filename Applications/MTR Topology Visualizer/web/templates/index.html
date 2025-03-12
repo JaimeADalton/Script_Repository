@@ -1,50 +1,80 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa Topológico MTR</title>
+    <meta name="description" content="MTR Topology Visualizer - Network topology visualization tool">
+    <title>MTR Topology Visualizer</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}" type="image/x-icon">
 </head>
 <body>
     <div id="app">
         <header>
-            <h1>Mapa Topológico de Red MTR</h1>
+            <div class="header-title">
+                <h1>MTR Topology Visualizer</h1>
+            </div>
+            
             <div class="controls">
-                <div class="control-group">
-                    <label for="group-select">Grupo:</label>
-                    <select id="group-select">
-                        <option value="all">Todos</option>
-                        <!-- Se llenará dinámicamente -->
-                    </select>
+                <form id="filter-form">
+                    <div class="control-group">
+                        <label for="group-select">Group:</label>
+                        <select id="group-select" name="group">
+                            <option value="all">All Groups</option>
+                            <!-- Will be populated dynamically -->
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label for="agent-select">Agent:</label>
+                        <select id="agent-select" name="agent">
+                            <option value="all">All Agents</option>
+                            <!-- Will be populated dynamically -->
+                        </select>
+                    </div>
+                </form>
+                
+                <div class="button-group">
+                    <button id="refresh-btn" class="button">
+                        <span class="icon">⟳</span> Refresh
+                    </button>
+                    
+                    <div class="control-group auto-refresh">
+                        <label for="auto-refresh-toggle">Auto-refresh:</label>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-refresh-toggle">
+                            <span class="slider round"></span>
+                        </label>
+                        <select id="refresh-interval">
+                            <option value="30">30s</option>
+                            <option value="60" selected>1m</option>
+                            <option value="300">5m</option>
+                            <option value="600">10m</option>
+                        </select>
+                    </div>
+                    
+                    <button id="manage-btn" class="button">
+                        <span class="icon">⚙</span> Manage Agents
+                    </button>
                 </div>
-                <div class="control-group">
-                    <label for="agent-select">Agente:</label>
-                    <select id="agent-select">
-                        <option value="all">Todos</option>
-                        <!-- Se llenará dinámicamente -->
-                    </select>
-                </div>
-                <button id="refresh-btn" class="button">
-                    <span class="icon">⟳</span> Actualizar
-                </button>
-                <button id="manage-btn" class="button">
-                    <span class="icon">⚙</span> Gestionar
-                </button>
             </div>
         </header>
         
         <main>
+            <div id="error-message" class="error-message"></div>
+            
+            <div id="status-indicator" class="status-indicator"></div>
+            
             <div id="topology-container">
                 <svg id="topology-graph"></svg>
                 <div id="tooltip" class="tooltip"></div>
-                <div id="loading" class="loading">Cargando datos...</div>
+                <div id="loading" class="loading">Loading data...</div>
                 
                 <div class="legend">
-                    <h3>Leyenda</h3>
+                    <h3>Legend</h3>
                     <div class="legend-item">
                         <div class="legend-color source"></div>
-                        <span>Origen (Servidor)</span>
+                        <span>Source (Server)</span>
                     </div>
                     <div class="legend-item">
                         <div class="legend-color router"></div>
@@ -52,72 +82,78 @@
                     </div>
                     <div class="legend-item">
                         <div class="legend-color destination"></div>
-                        <span>Destino (Agente)</span>
+                        <span>Destination (Agent)</span>
                     </div>
-                    <h4>Pérdida de paquetes</h4>
+                    <h4>Packet Loss</h4>
                     <div class="legend-item">
                         <div class="legend-line good"></div>
-                        <span>Sin pérdida</span>
+                        <span>No loss</span>
                     </div>
                     <div class="legend-item">
                         <div class="legend-line warning"></div>
-                        <span>Pérdida baja (0.1-1%)</span>
+                        <span>Low loss (0.1-1%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-line medium"></div>
+                        <span>Medium loss (1-5%)</span>
                     </div>
                     <div class="legend-item">
                         <div class="legend-line critical"></div>
-                        <span>Pérdida alta (>5%)</span>
+                        <span>High loss (>5%)</span>
                     </div>
                 </div>
             </div>
             
-            <!-- Panel de gestión de agentes (oculto por defecto) -->
+            <!-- Agent Management Panel (hidden by default) -->
             <div id="management-panel" class="modal hidden">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h2>Gestión de Agentes</h2>
+                        <h2>Agent Management</h2>
                         <button id="close-modal" class="close-btn">&times;</button>
                     </div>
                     <div class="modal-body">
                         <div class="actions">
                             <div class="action-form">
-                                <h3>Añadir nuevo agente</h3>
+                                <h3>Add New Agent</h3>
                                 <div class="form-group">
-                                    <label for="new-agent-ip">Dirección IP:</label>
-                                    <input type="text" id="new-agent-ip" placeholder="Ej: 192.168.1.1">
+                                    <label for="new-agent-ip">IP Address:</label>
+                                    <input type="text" id="new-agent-ip" placeholder="e.g.: 192.168.1.1">
                                 </div>
                                 <div class="form-group">
-                                    <label for="new-agent-name">Nombre (opcional):</label>
-                                    <input type="text" id="new-agent-name" placeholder="Ej: Router Principal">
+                                    <label for="new-agent-name">Name (optional):</label>
+                                    <input type="text" id="new-agent-name" placeholder="e.g.: Main Router">
                                 </div>
                                 <div class="form-group">
-                                    <label for="new-agent-group">Grupo:</label>
-                                    <input type="text" id="new-agent-group" placeholder="Ej: Datacenter" value="default">
+                                    <label for="new-agent-group">Group:</label>
+                                    <input type="text" id="new-agent-group" placeholder="e.g.: Datacenter" value="default">
                                 </div>
-                                <button id="add-agent-btn" class="button primary">Añadir</button>
+                                <button id="add-agent-btn" class="button primary">Add Agent</button>
                             </div>
                             <div class="action-form">
-                                <h3>Descubrir desde Telegraf</h3>
+                                <h3>Discover from Telegraf</h3>
                                 <div class="form-group">
-                                    <label for="telegraf-path">Ruta de configuración:</label>
+                                    <label for="telegraf-path">Configuration path:</label>
                                     <input type="text" id="telegraf-path" value="/etc/telegraf/telegraf.d/">
                                 </div>
-                                <button id="discover-btn" class="button">Descubrir</button>
+                                <button id="discover-btn" class="button">Discover Agents</button>
+                                <p class="help-text">This will search for ping configurations in Telegraf files and add them as agents.</p>
                             </div>
                         </div>
                         <div class="agent-list">
-                            <h3>Agentes configurados</h3>
+                            <h3>Configured Agents</h3>
                             <table id="agents-table">
                                 <thead>
                                     <tr>
-                                        <th>Dirección</th>
-                                        <th>Nombre</th>
-                                        <th>Grupo</th>
-                                        <th>Estado</th>
-                                        <th>Acciones</th>
+                                        <th>Address</th>
+                                        <th>Name</th>
+                                        <th>Group</th>
+                                        <th>Status</th>
+                                        <th>Last Scan</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <!-- Se llenará dinámicamente -->
+                                    <!-- Will be populated dynamically -->
                                 </tbody>
                             </table>
                         </div>
@@ -127,11 +163,18 @@
         </main>
         
         <footer>
-            <p>MTR Topology Visualizer v1.0</p>
+            <div class="footer-content">
+                <p>MTR Topology Visualizer v1.0</p>
+                <nav class="footer-nav">
+                    <a href="/" class="active">Topology</a>
+                    <a href="/dashboard">Dashboard</a>
+                    <a href="/about">About</a>
+                </nav>
+            </div>
         </footer>
     </div>
     
-    <!-- Importar D3.js desde una ubicación local -->
+    <!-- Import D3.js -->
     <script src="{{ url_for('static', filename='js/d3.v7.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/topology.js') }}"></script>
 </body>
