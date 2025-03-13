@@ -70,20 +70,20 @@ validate_user_file() {
 is_system_user() {
     local username=$1
     local uid
-    
+
     # Obtener el UID del usuario
     uid=$(id -u "$username" 2>/dev/null)
-    
+
     # Si no podemos obtener el UID, asumimos que es un usuario del sistema para estar seguros
     if [[ $? -ne 0 ]]; then
         log ERROR "No se pudo obtener UID para $username, asumiendo como usuario del sistema por seguridad"
         return 0
     fi
-    
+
     # Lista de nombres de usuarios del sistema que nunca deberían eliminarse
     # Esta lista puede ampliarse según necesidades específicas
     local system_users=("root" "nobody" "nfsnobody" "daemon" "bin" "sys" "sync" "games" "man" "lp" "mail" "news" "uucp" "proxy" "www-data" "backup" "list" "irc" "gnats" "systemd-network" "systemd-resolve" "messagebus" "sshd")
-    
+
     # Comprobar si el usuario está en la lista de usuarios del sistema por nombre
     for sys_user in "${system_users[@]}"; do
         if [[ "$username" == "$sys_user" ]]; then
@@ -91,7 +91,7 @@ is_system_user() {
             return 0
         fi
     done
-    
+
     # Verificar por rango de UID:
     # - UIDs bajos (< 1000): usuarios del sistema tradicionales
     # - UIDs altos (≥ 65000): usuarios especiales como nobody
@@ -175,19 +175,19 @@ create_user() {
 
 delete_user() {
     local username=$1
-    
+
     # PROTECCIÓN IMPORTANTE: No eliminar usuarios del sistema
     if is_system_user "$username"; then
         log DEBUG "Protegiendo usuario del sistema: $username"
         return 0
     fi
-    
+
     # PROTECCIÓN ADICIONAL: No eliminar el usuario actual que ejecuta el script
     if [[ "$username" == "$(whoami)" ]]; then
         log ERROR "¡PROTECCIÓN! No se puede eliminar el usuario actual ($username)"
         return 1
     fi  # Corregido: Se eliminó el cierre de llave incorrecto
-    
+
     log INFO "Eliminando usuario regular: $username"
     if userdel -r "$username" 2>/dev/null; then
         log INFO "Usuario $username eliminado exitosamente"
@@ -212,7 +212,7 @@ cleanup_users() {
     sed -e 's/#.*//' -e 's/ //g' "$USER_FILE" | grep -v '^$' > "$tmpfile"
 
     log INFO "Iniciando verificación de usuarios que no están en $USER_FILE"
-    
+
     while IFS=: read -r username _; do
         # Verificar cada usuario
         if ! grep -Fxq "$username" "$tmpfile"; then
@@ -225,7 +225,7 @@ cleanup_users() {
             fi
         fi
     done < /etc/passwd
-    
+
     rm "$tmpfile"
 }
 
@@ -233,7 +233,7 @@ main() {
     check_root
     check_dependencies
     validate_user_file
-    
+
     # Verificación de seguridad - comprobar que is_system_user detecta correctamente root
     if ! is_system_user "root"; then
         log ERROR "FALLO CRÍTICO: La protección de usuarios del sistema no funciona."
