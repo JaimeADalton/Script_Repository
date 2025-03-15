@@ -283,6 +283,10 @@ class TelegrafManager:
     [[inputs.snmp.table.field]]
       name = "ifHCOutOctets"
       oid = "IF-MIB::ifHCOutOctets"
+
+    [[inputs.snmp.table.field]]
+      name = "ifOperStatus"
+      oid = "IF-MIB::ifOperStatus"
 """
 
     def generate_selected_interfaces_config(self, agent_ip, site_name, selected_interfaces):
@@ -317,6 +321,10 @@ class TelegrafManager:
   [[inputs.snmp.field]]
     name = "ifHCOutOctets"
     oid = "IF-MIB::ifHCOutOctets.{if_index}"
+
+  [[inputs.snmp.field]]
+    name = "ifOperStatus"
+    oid = "IF-MIB::ifOperStatus.{if_index}"
 
 """
         return config
