@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  ubuntu-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: ubuntu-toolkit
+    restart: always
+
+    # Puertos esenciales
+#    ports:
+#      - "2222:22"    # SSH
+#      - "8080:80"    # HTTP
+#      - "8443:443"   # HTTPS
+#      - "33060:3306" # MariaDB
+#      - "54320:5432" # PostgreSQL
+#      - "63790:6379" # Redis
+#
+    # Volúmenes con creación automática de directorios
+    volumes:
+      - ./datos/espacio_trabajo:/home/usuario/espacio_trabajo
+      - ./datos/datos:/home/usuario/datos
+      - ./datos/scripts:/home/usuario/scripts
+      - ./datos/copias_seguridad:/home/usuario/copias_seguridad
+
+    # Variables de entorno verificadas y funcionales
+    environment:
+      - TZ=Europe/Madrid
+      - LANG=es_ES.UTF-8
+      - LC_ALL=es_ES.UTF-8
+      - LANGUAGE=es_ES
+      - DEBIAN_FRONTEND=noninteractive
+
+    # Redes
+    networks:
+      - toolkit-network
+
+    # Health check validado
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "22"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# Definición de redes
+networks:
+  toolkit-network:
+    driver: bridge
