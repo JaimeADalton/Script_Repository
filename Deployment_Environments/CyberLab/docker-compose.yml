@@ -2,14 +2,12 @@ version: '3.8'
 
 services:
   security-toolkit:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: cyberlab:v1
     container_name: security-toolkit
     hostname: security-lab
     restart: unless-stopped
     ports:
-      - "2222:22"     # SSH
+      - "2220:22"     # SSH
       - "8080:8080"   # Para aplicaciones web
       - "4444:4444"   # Para Metasploit
       - "8000:8000"   # Para servidores web simples
