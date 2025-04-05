@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solicitud de Monitorización de Dispositivo</title>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --primary-hover: #1d4ed8;
+            --success-color: #10b981;
+            --success-hover: #059669;
+            --border-color: #e2e8f0;
+            --error-color: #ef4444;
+            --text-color: #1e293b;
+            --text-light: #64748b;
+            --bg-light: #f8fafc;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+            --radius: 8px;
+            --transition: all 0.3s ease;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: #f1f5f9;
+            padding: 30px 15px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 30px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-md);
+        }
+        
+        h1 {
+            text-align: center;
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            font-weight: 600;
+            position: relative;
+            padding-bottom: 15px;
+        }
+        
+        h1:after {
+            content: '';
+            position: absolute;
+            width: 60px;
+            height: 3px;
+            background: var(--primary-color);
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        
+        h2 {
+            color: var(--primary-color);
+            margin: 25px 0 15px 0;
+            font-weight: 500;
+        }
+        
+        p.info {
+            font-size: 0.95em;
+            color: var(--text-light);
+            margin-bottom: 25px;
+            text-align: center;
+        }
+        
+        fieldset {
+            border: 1px solid var(--border-color);
+            padding: 25px;
+            margin: 25px 0;
+            border-radius: var(--radius);
+            background-color: var(--bg-light);
+            box-shadow: var(--shadow-sm);
+            position: relative;
+        }
+        
+        legend {
+            font-weight: 600;
+            color: var(--primary-color);
+            padding: 0 10px;
+            font-size: 1.1em;
+            background: #fff;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--text-color);
+        }
+        
+        input[type="text"],
+        textarea {
+            width: 100%;
+            padding: 12px 15px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            background-color: #fff;
+            color: var(--text-color);
+            transition: var(--transition);
+            font-size: 1em;
+        }
+        
+        input[type="text"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+        }
+        
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        
+        input[type="checkbox"],
+        input[type="radio"] {
+            margin-right: 8px;
+            transform: scale(1.2);
+            accent-color: var(--primary-color);
+        }
+        
+        .input-group {
+            margin-bottom: 15px;
+        }
+        
+        .input-group label,
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            font-weight: normal;
+            margin-bottom: 12px;
+            cursor: pointer;
+            padding: 5px 0;
+            transition: var(--transition);
+        }
+        
+        .input-group label:hover,
+        .checkbox-group label:hover {
+            color: var(--primary-color);
+        }
+        
+        .options-group {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        button[type="submit"] {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            background-color: var(--success-color);
+            color: white;
+            border: none;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 1em;
+            margin-top: 30px;
+            font-weight: 600;
+            transition: var(--transition);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: var(--shadow-sm);
+        }
+        
+        button[type="submit"]:hover {
+            background-color: var(--success-hover);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+        
+        #json-output {
+            margin-top: 20px;
+            background-color: #1e293b;
+            color: #f8fafc;
+            padding: 20px;
+            border-radius: var(--radius);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            box-shadow: var(--shadow-sm);
+            overflow-x: auto;
+        }
+        
+        .error {
+            color: var(--error-color);
+            font-size: 0.85em;
+            margin-top: -15px;
+            margin-bottom: 15px;
+            display: block;
+            visibility: hidden;
+            opacity: 0;
+            height: 0;
+            transition: opacity 0.3s ease, height 0.3s ease;
+        }
+        
+        .error.visible {
+            visibility: visible;
+            opacity: 1;
+            height: auto;
+        }
+        
+        input:invalid.touched,
+        textarea:invalid.touched {
+            border-color: var(--error-color);
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        #snmpOptionsDiv {
+            border-left: 3px solid var(--primary-color);
+            padding-left: 20px;
+            margin: 15px 0;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        #output-area {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: var(--radius);
+            background-color: var(--bg-light);
+            border: 1px solid var(--border-color);
+            animation: fadeIn 0.5s ease;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        #downloadLink {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 10px 20px;
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            border-radius: var(--radius);
+            font-weight: 500;
+            transition: var(--transition);
+            text-align: center;
+        }
+        
+        #downloadLink:hover {
+            background-color: var(--primary-hover);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+        
+        /* Mejora para dispositivos móviles */
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            
+            fieldset {
+                padding: 15px;
+            }
+            
+            button[type="submit"] {
+                padding: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Solicitud de Monitorización</h1>
+    <p class="info">Complete el formulario para solicitar la configuración de la monitorización de un dispositivo.</p>
+
+    <form id="monitoringRequestForm" novalidate>
+
+        <fieldset>
+            <legend>Información General</legend>
+            <label for="requesterName">Tu Nombre (Solicitante):*</label>
+            <input type="text" id="requesterName" name="requesterName" required placeholder="Nombre y Apellido del solicitante">
+            <div class="error" id="requesterName-error">Campo obligatorio.</div>
+
+            <label for="deviceName">Nombre/IP del Dispositivo a Monitorizar:*</label>
+            <input type="text" id="deviceName" name="deviceName" required placeholder="Ej: servidor-web-01 o 192.168.1.100">
+            <div class="error" id="deviceName-error">Campo obligatorio.</div>
+
+            <label for="monitoringSystem">Sistema de Monitorización Principal:*</label>
+            <div class="options-group">
+                <label for="sysGrafana">
+                    <input type="radio" id="sysGrafana" name="monitoringSystem" value="grafana" required>
+                    Grafana (Visualización/Métricas)
+                </label>
+                <label for="sysNagios">
+                    <input type="radio" id="sysNagios" name="monitoringSystem" value="nagios" required>
+                    Nagios (Alertas/Estado)
+                </label>
+            </div>
+            <div class="error" id="monitoringSystem-error">Debe seleccionar un sistema de monitorización.</div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Tipo de Monitorización*</legend>
+            <p class="info">Seleccione al menos un método de monitorización.</p>
+            <div class="options-group checkbox-group">
+                <label for="monitorIcmp">
+                    <input type="checkbox" id="monitorIcmp" name="monitoringType" value="icmp"> 
+                    ICMP (Ping - Disponibilidad básica)
+                </label>
+                <label for="monitorSnmp">
+                    <input type="checkbox" id="monitorSnmp" name="monitoringType" value="snmp"> 
+                    SNMP (Métricas detalladas - requiere configuración SNMP en el dispositivo)
+                </label>
+            </div>
+            <div class="error" id="monitoringType-error">Debe seleccionar al menos un tipo de monitorización (ICMP o SNMP).</div>
+
+            <!-- Opciones Condicionales para SNMP -->
+            <div id="snmpOptionsDiv" class="hidden">
+                <p class="info"><strong>Configuración SNMP:</strong></p>
+
+                <label>Interfaces a monitorizar vía SNMP:*</label>
+                <div class="options-group">
+                    <label for="snmpAll">
+                        <input type="radio" id="snmpAll" name="snmpInterfacesScope" value="all" checked>
+                        Todas las interfaces detectadas
+                    </label>
+                    <label for="snmpSpecific">
+                        <input type="radio" id="snmpSpecific" name="snmpInterfacesScope" value="specific">
+                        Interfaces específicas
+                    </label>
+                </div>
+                <div class="error" id="snmpInterfacesScope-error">Debe seleccionar si monitorizar todas o interfaces específicas.</div>
+
+                <!-- Campo para listar interfaces específicas (oculto por defecto) -->
+                <div id="specificInterfacesDiv" class="hidden">
+                    <label for="specificInterfaces">Nombres/Descripciones de Interfaces Específicas:*</label>
+                    <textarea id="specificInterfaces" name="specificInterfaces" placeholder="Escriba una interfaz por línea. Ej:&#10;eth0 (LAN Principal)&#10;eth1 (WAN)&#10;GigabitEthernet0/1"></textarea>
+                    <div class="error" id="specificInterfaces-error">Debe listar al menos una interfaz si selecciona 'Interfaces específicas'.</div>
+                </div>
+
+                <label>Métricas Adicionales (requieren SNMP):</label>
+                <div class="options-group checkbox-group">
+                    <label for="checkCpu">
+                        <input type="checkbox" id="checkCpu" name="additionalChecks" value="cpu"> 
+                        Uso de CPU
+                    </label>
+                    <label for="checkRam">
+                        <input type="checkbox" id="checkRam" name="additionalChecks" value="ram"> 
+                        Uso de Memoria RAM
+                    </label>
+                    <label for="checkStatus">
+                        <input type="checkbox" id="checkStatus" name="additionalChecks" value="interface_status"> 
+                        Estado Operacional de Interfaces
+                    </label>
+                </div>
+            </div> <!-- Fin snmpOptionsDiv -->
+
+        </fieldset>
+
+        <button type="submit">Generar Solicitud</button>
+    </form>
+
+    <div id="output-area" class="hidden">
+        <h2>JSON Generado:</h2>
+        <p class="info">Este es el JSON que representa la solicitud de monitorización. Puedes copiarlo o descargarlo.</p>
+        <pre id="json-output"></pre>
+        <a id="downloadLink" href="#" download="monitoring_request.json">Descargar JSON</a>
+    </div>
+
+</div>
+
+<script>
+    const form = document.getElementById('monitoringRequestForm');
+    const requesterNameInput = document.getElementById('requesterName');
+    const deviceNameInput = document.getElementById('deviceName');
+    const monitorIcmpCheckbox = document.getElementById('monitorIcmp');
+    const monitorSnmpCheckbox = document.getElementById('monitorSnmp');
+    const snmpOptionsDiv = document.getElementById('snmpOptionsDiv');
+    const snmpInterfaceRadios = document.querySelectorAll('input[name="snmpInterfacesScope"]');
+    const snmpSpecificRadio = document.getElementById('snmpSpecific');
+    const specificInterfacesDiv = document.getElementById('specificInterfacesDiv');
+    const specificInterfacesTextarea = document.getElementById('specificInterfaces');
+    const additionalCheckboxes = document.querySelectorAll('input[name="additionalChecks"]');
+    const outputArea = document.getElementById('output-area');
+    const jsonOutputPre = document.getElementById('json-output');
+    const downloadLink = document.getElementById('downloadLink');
+
+    // Referencias a los divs de error
+    const requesterNameError = document.getElementById('requesterName-error');
+    const deviceNameError = document.getElementById('deviceName-error');
+    const monitoringSystemError = document.getElementById('monitoringSystem-error');
+    const monitoringTypeError = document.getElementById('monitoringType-error');
+    const snmpInterfacesScopeError = document.getElementById('snmpInterfacesScope-error');
+    const specificInterfacesError = document.getElementById('specificInterfaces-error');
+
+    // --- Funciones de UI para Errores (reutilizadas) ---
+    function showError(errorElement, message = '') {
+        if (message && errorElement) errorElement.textContent = message;
+        if (errorElement) errorElement.classList.add('visible');
+        // Marcar input asociado si existe
+        const inputId = errorElement?.id.replace('-error', '');
+        const inputElement = document.getElementById(inputId) || document.querySelector(`[name="${inputId}"]`);
+        inputElement?.classList.add('touched'); // Marcar visualmente
+    }
+
+    function hideError(errorElement) {
+        if (errorElement) errorElement.classList.remove('visible');
+        const inputId = errorElement?.id.replace('-error', '');
+        // Quitar marca visual (puede ser un input, textarea, o el primer radio/checkbox del grupo)
+        const inputElement = document.getElementById(inputId) || document.querySelector(`[name="${inputId}"]`);
+         inputElement?.classList.remove('touched');
+    }
+
+    function hideAllErrors() {
+        [
+            requesterNameError, deviceNameError, monitoringSystemError,
+            monitoringTypeError, snmpInterfacesScopeError, specificInterfacesError
+        ].forEach(hideError);
+        // Quitar clase 'touched' de todos los inputs relevantes
+        form.querySelectorAll('.touched').forEach(el => el.classList.remove('touched'));
+    }
+
+    // --- Funciones de Lógica Condicional ---
+    function toggleSnmpOptions() {
+        const isSnmpChecked = monitorSnmpCheckbox.checked;
+        snmpOptionsDiv.classList.toggle('hidden', !isSnmpChecked);
+
+        // Habilitar/deshabilitar métricas adicionales basado en SNMP
+        additionalCheckboxes.forEach(chk => chk.disabled = !isSnmpChecked);
+
+        // Si SNMP se desmarca, ocultar también las opciones específicas de interfaz
+        if (!isSnmpChecked) {
+            specificInterfacesDiv.classList.add('hidden');
+             // Opcional: resetear radios y textarea de SNMP al desmarcar
+             // document.getElementById('snmpAll').checked = true; // Volver al default
+             // specificInterfacesTextarea.value = '';
+             // hideError(snmpInterfacesScopeError); // Ocultar errores relacionados
+             // hideError(specificInterfacesError);
+        } else {
+             // Si SNMP se marca, asegurar que el sub-div de específicas se muestre si aplica
+             toggleSpecificInterfaces();
+        }
+    }
+
+    function toggleSpecificInterfaces() {
+         // Esta función solo tiene efecto si SNMP está habilitado
+        if (monitorSnmpCheckbox.checked) {
+             const showSpecific = snmpSpecificRadio.checked;
+             specificInterfacesDiv.classList.toggle('hidden', !showSpecific);
+        } else {
+             // Si SNMP no está chequeado, las específicas siempre ocultas
+             specificInterfacesDiv.classList.add('hidden');
+        }
+    }
+
+    // --- Función de Validación Principal ---
+    function validateForm() {
+        let isValid = true;
+        hideAllErrors(); // Ocultar errores previos
+
+        // 1. Solicitante (Requerido)
+        if (requesterNameInput.value.trim() === '') {
+            showError(requesterNameError);
+            isValid = false;
+        }
+
+        // 2. Nombre del Dispositivo (Requerido)
+        if (deviceNameInput.value.trim() === '') {
+            showError(deviceNameError);
+            isValid = false;
+        }
+
+        // 3. Sistema de Monitorización (Selección Requerida)
+        const selectedSystem = document.querySelector('input[name="monitoringSystem"]:checked');
+        if (!selectedSystem) {
+            showError(monitoringSystemError);
+            isValid = false;
+        }
+
+        // 4. Tipo de Monitorización (Al menos uno requerido)
+        const icmpChecked = monitorIcmpCheckbox.checked;
+        const snmpChecked = monitorSnmpCheckbox.checked;
+        if (!icmpChecked && !snmpChecked) {
+            showError(monitoringTypeError);
+            isValid = false;
+        }
+
+        // 5. Validación Condicional SNMP
+        if (snmpChecked) {
+            // 5a. Selección de Scope de Interfaces (requerido si SNMP está activo)
+            const selectedScope = document.querySelector('input[name="snmpInterfacesScope"]:checked');
+            if (!selectedScope) {
+                 // Esto no debería pasar si uno está checked por defecto, pero por si acaso
+                 showError(snmpInterfacesScopeError);
+                 isValid = false;
+            } else if (selectedScope.value === 'specific') {
+                // 5b. Si es específico, el textarea no puede estar vacío
+                if (specificInterfacesTextarea.value.trim() === '') {
+                    showError(specificInterfacesError);
+                    isValid = false;
+                }
+            }
+             // Podríamos añadir validación de formato para el textarea si quisiéramos
+        }
+
+        return isValid;
+    }
+
+    // --- Event Listeners ---
+
+    // Mostrar/Ocultar opciones SNMP al cambiar el checkbox SNMP
+    monitorSnmpCheckbox.addEventListener('change', toggleSnmpOptions);
+
+    // Mostrar/Ocultar textarea de interfaces específicas al cambiar radios de scope SNMP
+    snmpInterfaceRadios.forEach(radio => {
+        radio.addEventListener('change', () => {
+            toggleSpecificInterfaces();
+             // Si cambian la selección, ocultar el error del textarea si estaba visible
+             if(radio.checked) hideError(snmpInterfacesScopeError);
+             if (radio.value === 'specific' && specificInterfacesTextarea.value.trim() !== '') {
+                 hideError(specificInterfacesError); // Ocultar si ya hay texto
+             } else if (radio.value === 'all') {
+                 hideError(specificInterfacesError); // Ocultar siempre si eligen 'all'
+             }
+        });
+    });
+
+     // Ocultar error de textarea específico al empezar a escribir
+     specificInterfacesTextarea.addEventListener('input', () => {
+         if (specificInterfacesTextarea.value.trim() !== '') {
+             hideError(specificInterfacesError);
+         }
+     });
+
+    // Limpiar errores "requerido" de campos de texto al escribir
+    [requesterNameInput, deviceNameInput].forEach(input => {
+        input.addEventListener('input', () => {
+            if (input.value.trim() !== '') {
+                const errorElement = document.getElementById(`${input.id}-error`);
+                if (errorElement) hideError(errorElement);
+            }
+        });
+    });
+
+    // Limpiar error de selección de sistema al seleccionar uno
+    document.querySelectorAll('input[name="monitoringSystem"]').forEach(radio => {
+        radio.addEventListener('change', () => hideError(monitoringSystemError));
+    });
+
+     // Limpiar error de tipo de monitorización si al menos uno está marcado
+     [monitorIcmpCheckbox, monitorSnmpCheckbox].forEach(checkbox => {
+         checkbox.addEventListener('change', () => {
+             if (monitorIcmpCheckbox.checked || monitorSnmpCheckbox.checked) {
+                 hideError(monitoringTypeError);
+             }
+         });
+     });
+
+
+    // --- Procesamiento del Envío del Formulario ---
+    form.addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        if (!validateForm()) {
+            // console.warn("Formulario de monitorización inválido.");
+             // Encontrar el primer error visible y enfocar su campo asociado
+             const firstError = document.querySelector('.error.visible');
+             if (firstError) {
+                  let fieldToFocus = null;
+                  const inputId = firstError.id.replace('-error', '');
+                  fieldToFocus = document.getElementById(inputId);
+                  if (!fieldToFocus) { // Podría ser un grupo de radio/checkbox
+                     fieldToFocus = document.querySelector(`[name="${inputId}"]`);
+                  }
+                  fieldToFocus?.focus();
+             }
+            return; // Detener si no es válido
+        }
+
+        // --- Si el formulario ES VÁLIDO, continuar ---
+        console.log("Formulario válido, generando JSON...");
+
+        // Recoger datos
+        const selectedSystem = document.querySelector('input[name="monitoringSystem"]:checked').value;
+        const monitoringTypes = [];
+        if (monitorIcmpCheckbox.checked) monitoringTypes.push('icmp');
+        if (monitorSnmpCheckbox.checked) monitoringTypes.push('snmp');
+
+        const snmpDetails = { enabled: monitorSnmpCheckbox.checked };
+        if (monitorSnmpCheckbox.checked) {
+            const scope = document.querySelector('input[name="snmpInterfacesScope"]:checked').value;
+            snmpDetails.interfaces = { scope: scope };
+            if (scope === 'specific') {
+                // Dividir por líneas y quitar vacías/espacios
+                snmpDetails.interfaces.list = specificInterfacesTextarea.value.trim()
+                                                 .split('\n')
+                                                 .map(line => line.trim())
+                                                 .filter(line => line !== '');
+            }
+             // Añadir métricas adicionales si SNMP está activo
+             snmpDetails.additionalChecks = {};
+             additionalCheckboxes.forEach(chk => {
+                snmpDetails.additionalChecks[chk.value] = chk.checked;
+             });
+        } else {
+             // Si SNMP no está activo, no incluir checks adicionales explícitos o ponerlos a false
+             snmpDetails.additionalChecks = { cpu: false, ram: false, interface_status: false };
+        }
+
+
+        // Construir el objeto de datos
+        const monitoringRequestData = {
+            schemaVersion: "1.0", // Versión inicial para este tipo de solicitud
+            timestamp: new Date().toISOString(),
+            requester: requesterNameInput.value.trim(),
+            targetDevice: deviceNameInput.value.trim(),
+            monitoringSystem: selectedSystem,
+            monitoringTypes: monitoringTypes,
+            snmp: snmpDetails
+        };
+
+        // Convertir a JSON
+        const jsonString = JSON.stringify(monitoringRequestData, null, 2);
+
+        // Mostrar JSON y enlace de descarga
+        jsonOutputPre.textContent = jsonString;
+        outputArea.classList.remove('hidden'); // Mostrar el área de salida
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        downloadLink.href = URL.createObjectURL(blob);
+        downloadLink.download = `monitoring_${monitoringRequestData.targetDevice}_request_${new Date().getTime()}.json`;
+
+        // Simular envío/log
+        console.log("JSON generado:", monitoringRequestData);
+        alert('¡Solicitud válida! JSON generado y mostrado abajo.');
+
+        // Opcional: Resetear el formulario tras envío exitoso
+        // form.reset();
+        // hideAllErrors();
+        // outputArea.classList.add('hidden');
+        // toggleSnmpOptions(); // Asegurar estado inicial de elementos condicionales
+        // toggleSpecificInterfaces();
+    });
+
+    // --- Estado Inicial ---
+    // Asegurarse de que las opciones SNMP están ocultas al cargar la página
+    toggleSnmpOptions();
+    // Asegurarse de que el área de texto específica está oculta al cargar
+    toggleSpecificInterfaces();
+</script>
+
+</body>
+</html>
