@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solicitud de Creación de Usuario</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 700px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"],
+        input[type="email"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px; /* Ajustado para error debajo */
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        /* Estilo para cuando un campo es inválido *después* de intentar enviar */
+        input:invalid.touched {
+             border-color: red;
+        }
+
+        input[type="checkbox"],
+        input[type="radio"] {
+            margin-right: 5px;
+            vertical-align: middle;
+        }
+        .input-group label,
+        .vlan-header label {
+            display: inline-block;
+            font-weight: normal;
+            margin-bottom: 10px;
+            margin-right: 15px;
+            vertical-align: middle;
+        }
+         .vlan-group label {
+             display: block;
+             font-weight: normal;
+             margin-bottom: 8px;
+         }
+        fieldset {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-top: 20px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+        legend {
+            font-weight: bold;
+            color: #333;
+            padding: 0 10px;
+            font-size: 1.1em;
+        }
+        button[type="submit"] {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background-color: #5cb85c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 20px;
+        }
+        button[type="submit"]:hover {
+            background-color: #4cae4c;
+        }
+        #json-output {
+            margin-top: 20px;
+            background-color: #e9e9e9;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: monospace;
+        }
+        /* Asegurar que los errores empiezan ocultos */
+        .error {
+            color: red;
+            font-size: 0.9em;
+            margin-top: -10px; /* Pegar más al campo de arriba */
+            margin-bottom: 10px;
+            display: block; /* Ocupa espacio */
+            visibility: hidden; /* Usar visibility en lugar de display none */
+            opacity: 0;
+            height: 0; /* Ocupa 0 espacio inicialmente */
+            transition: opacity 0.3s ease, height 0.3s ease; /* Animación suave */
+        }
+        .error.visible { /* Clase para mostrar errores */
+            visibility: visible;
+            opacity: 1;
+            height: auto; /* Altura automática cuando es visible */
+        }
+        .hidden { /* Clase de utilidad por si se necesita display:none */
+            display: none;
+        }
+        .info {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 10px;
+            margin-top: 5px;
+        }
+        .vlan-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .vlan-header p {
+            margin: 0;
+        }
+        .action-link {
+            color: #007bff;
+            text-decoration: underline;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .action-link:hover {
+            color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Solicitud de Creación de Usuario</h1>
+    <p class="info">Complete el formulario para solicitar la creación de un nuevo usuario en el sistema, incluyendo sus permisos y acceso a redes.</p>
+
+    <!-- Añadido 'novalidate' para desactivar burbujas de validación HTML5 y controlar todo con JS -->
+    <form id="userRequestForm" novalidate>
+
+        <fieldset>
+            <legend>Información Básica</legend>
+            <label for="requesterName">Tu Nombre (Solicitante):*</label>
+            <input type="text" id="requesterName" name="requesterName" required placeholder="Nombre y Apellido del solicitante">
+             <div class="error" id="requesterName-error">Campo obligatorio.</div>
+
+            <label for="username">Nombre de Usuario a crear:*</label>
+            <input type="text" id="username" name="username" required pattern="^[a-z_][a-z0-9_-]*$" title="Solo minúsculas, números, guión bajo y guión. Debe empezar por letra o guión bajo.">
+            <div class="error" id="username-error"></div> <!-- El mensaje se pondrá dinámicamente -->
+
+            <label for="fullName">Nombre Real Completo (Opcional):</label>
+            <input type="text" id="fullName" name="fullName" placeholder="Ej: Juan Pérez García">
+            <p class="info">Si se proporciona, se usará para el comentario del usuario (`useradd -c`).</p>
+        </fieldset>
+
+
+        <fieldset>
+            <legend>Nivel de Privilegios*</legend>
+             <p class="info">Seleccione el rol principal del usuario (obligatorio).</p>
+            <div class="input-group">
+                <input type="radio" id="privNone" name="privilegeLevel" value="none" required>
+                <label for="privNone">Ninguno (Usuario Estándar)</label>
+
+                <input type="radio" id="privNet" name="privilegeLevel" value="networking">
+                <label for="privNet">Networking</label>
+
+                <input type="radio" id="privSys" name="privilegeLevel" value="systems">
+                <label for="privSys">Sistemas</label>
+            </div>
+             <div class="error" id="privilegeLevel-error">Debe seleccionar un nivel de privilegios.</div>
+        </fieldset>
+
+
+        <fieldset>
+            <legend>Acceso a VLANs*</legend>
+            <div class="vlan-header">
+                 <p class="info">Marque las VLANs necesarias o seleccione todas (obligatorio).</p>
+                 <span id="vlanSelectToggle" class="action-link">Seleccionar Todas</span>
+            </div>
+            <div class="vlan-group">
+                 <!-- Lista de VLANs -->
+                 <label><input type="checkbox" name="vlan" class="vlan-checkbox" value="vlan100"> VLAN 100 (Usuarios)</label>
+                 <label><input type="checkbox" name="vlan" class="vlan-checkbox" value="vlan2"> VLAN 2 (Servidores Core)</label>
+                 <label><input type="checkbox" name="vlan" class="vlan-checkbox" value="vlan301"> VLAN 301 (Invitados)</label>
+                 <label><input type="checkbox" name="vlan" class="vlan-checkbox" value="vlan10"> VLAN 10 (Gestión)</label>
+                 <label><input type="checkbox" name="vlan" class="vlan-checkbox" value="vlan199"> VLAN 199 (Desarrollo)</label>
+                 <label><input type="checkbox" name="vlan" class="vlan-checkbox" value="vlan253"> VLAN 253 (VoIP)</label>
+                 <label><input type="checkbox" name="vlan" class="vlan-checkbox" value="vlan15"> VLAN 15 (Impresoras)</label>
+                 <label><input type="checkbox" name="vlan" class="vlan-checkbox" value="vlan485"> VLAN 485 (Bases de Datos)</label>
+                 <label><input type="checkbox" name="vlan" class="vlan-checkbox" value="vlan216"> VLAN 216 (Laboratorio)</label>
+            </div>
+             <div class="error" id="vlan-error">Debe seleccionar al menos una VLAN o usar "Seleccionar Todas".</div>
+        </fieldset>
+
+
+        <fieldset>
+            <legend>Configuración SSH</legend>
+            <div class="input-group">
+                <input type="checkbox" id="setupSsh" name="setupSsh" checked>
+                <label for="setupSsh">Configurar clave SSH (ed25519) y `authorized_keys`</label>
+            </div>
+            <div class="input-group">
+                <input type="checkbox" id="generatePpk" name="generatePpk" checked>
+                <label for="generatePpk">Generar clave .ppk para Putty/WinSCP (si `puttygen` está disponible)</label>
+            </div>
+             <p class="info">La configuración SSH es el método preferido de acceso seguro.</p>
+        </fieldset>
+
+
+        <button type="submit">Generar Solicitud JSON</button>
+    </form>
+
+    <div id="output-area" class="hidden"> <!-- Usamos display:none para esta área completa -->
+        <h2>JSON Generado:</h2>
+        <p class="info">Este es el JSON que se enviaría al backend para procesar la solicitud. Puedes copiarlo o descargarlo.</p>
+        <pre id="json-output"></pre>
+        <a id="downloadLink" href="#" download="user_request.json" style="display: block; margin-top: 10px;">Descargar JSON</a>
+    </div>
+
+</div>
+
+<script>
+    const form = document.getElementById('userRequestForm');
+    const requesterNameInput = document.getElementById('requesterName');
+    const usernameInput = document.getElementById('username');
+    const fullNameInput = document.getElementById('fullName');
+    const setupSshCheckbox = document.getElementById('setupSsh');
+    const generatePpkCheckbox = document.getElementById('generatePpk');
+    const outputArea = document.getElementById('output-area');
+    const jsonOutputPre = document.getElementById('json-output');
+    const downloadLink = document.getElementById('downloadLink');
+    const vlanSelectToggle = document.getElementById('vlanSelectToggle');
+    const vlanCheckboxes = document.querySelectorAll('.vlan-checkbox');
+
+    // Referencias a los divs de error
+    const requesterNameError = document.getElementById('requesterName-error');
+    const usernameError = document.getElementById('username-error');
+    const privilegeLevelError = document.getElementById('privilegeLevel-error');
+    const vlanError = document.getElementById('vlan-error');
+
+    // Array con todos los campos que necesitan validación básica de "requerido" o selección
+    const fieldsToValidate = [requesterNameInput, usernameInput]; // Añadir más si es necesario
+
+    // --- Funciones de UI para Errores ---
+    function showError(errorElement, message = '') {
+        if (message) errorElement.textContent = message;
+        errorElement.classList.add('visible');
+        // Podríamos añadir una clase al input asociado también
+        const inputId = errorElement.id.replace('-error', '');
+        document.getElementById(inputId)?.classList.add('touched'); // Marcar input visualmente si existe
+    }
+
+    function hideError(errorElement) {
+        errorElement.classList.remove('visible');
+         const inputId = errorElement.id.replace('-error', '');
+         document.getElementById(inputId)?.classList.remove('touched'); // Quitar marca visual
+    }
+
+    function hideAllErrors() {
+        [requesterNameError, usernameError, privilegeLevelError, vlanError].forEach(hideError);
+        // Quitar clase 'touched' de todos los inputs
+        fieldsToValidate.forEach(input => input.classList.remove('touched'));
+        // Resetear estilo de radios/checkboxes si es necesario (más complejo)
+    }
+
+
+    // --- Función de Validación Principal (llamada en submit) ---
+    function validateForm() {
+        let isValid = true;
+        hideAllErrors(); // Ocultar errores previos antes de revalidar
+
+        // 1. Solicitante (Requerido)
+        if (requesterNameInput.value.trim() === '') {
+            showError(requesterNameError);
+            isValid = false;
+        }
+
+        // 2. Nombre de Usuario (Requerido y Patrón)
+        const usernameValue = usernameInput.value.trim();
+        if (usernameValue === '') {
+            showError(usernameError, 'Nombre de usuario es obligatorio.');
+            isValid = false;
+        } else if (!usernameInput.validity.valid) { // Check pattern if not empty
+             showError(usernameError, usernameInput.title || 'Formato de usuario inválido.'); // Usar title
+             isValid = false;
+        }
+
+        // 3. Nivel de Privilegios (Selección Requerida)
+        const selectedPrivilege = document.querySelector('input[name="privilegeLevel"]:checked');
+        if (!selectedPrivilege) {
+            showError(privilegeLevelError);
+            isValid = false;
+        }
+
+        // 4. VLANs (Selección Requerida)
+        const checkedVlansCount = document.querySelectorAll('.vlan-checkbox:checked').length;
+        if (checkedVlansCount === 0) {
+            showError(vlanError);
+            isValid = false;
+        }
+
+        return isValid;
+    }
+
+    // --- Event Listeners ---
+
+    // Validación de patrón para username MIENTRAS se escribe, pero solo si hay contenido
+    usernameInput.addEventListener('input', () => {
+        const usernameValue = usernameInput.value.trim();
+        if (usernameValue !== '' && !usernameInput.validity.valid) {
+            // Si hay texto y el patrón falla, mostrar error de formato
+            showError(usernameError, usernameInput.title || 'Formato de usuario inválido.');
+        } else {
+            // Si está vacío o es válido, ocultar el error de formato
+            // El error de "requerido" solo aparecerá al intentar enviar
+            hideError(usernameError);
+        }
+    });
+
+    // Limpiar error de "requerido" de campos de texto tan pronto como se empieza a escribir
+    [requesterNameInput, usernameInput].forEach(input => {
+        input.addEventListener('input', () => {
+            if (input.value.trim() !== '') {
+                 // Ocultar solo el error asociado a este input específico
+                 const errorElement = document.getElementById(`${input.id}-error`);
+                 if (errorElement) hideError(errorElement);
+            }
+            // La validación completa se hará al enviar
+        });
+    });
+
+    // Limpiar error de selección de privilegio al seleccionar uno
+     document.querySelectorAll('input[name="privilegeLevel"]').forEach(radio => {
+         radio.addEventListener('change', () => hideError(privilegeLevelError));
+     });
+
+    // --- Lógica VLANs (sin cambios grandes, pero asegurando ocultar error) ---
+    vlanSelectToggle.addEventListener('click', () => {
+        const selectAll = vlanSelectToggle.textContent === 'Seleccionar Todas';
+        vlanCheckboxes.forEach(checkbox => {
+            checkbox.checked = selectAll;
+        });
+        vlanSelectToggle.textContent = selectAll ? 'Deseleccionar Todas' : 'Seleccionar Todas';
+        // Siempre que se interactúa con el toggle, asumimos intención de seleccionar, ocultamos error
+        hideError(vlanError);
+    });
+
+    vlanCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+            const allChecked = document.querySelectorAll('.vlan-checkbox:checked').length === vlanCheckboxes.length;
+            const anyChecked = document.querySelectorAll('.vlan-checkbox:checked').length > 0;
+            vlanSelectToggle.textContent = allChecked ? 'Deseleccionar Todas' : 'Seleccionar Todas';
+             // Ocultar error si al menos una está marcada
+            if (anyChecked) {
+                 hideError(vlanError);
+            }
+        });
+    });
+
+    // --- Lógica SSH (sin cambios) ---
+    setupSshCheckbox.addEventListener('change', function() {
+        generatePpkCheckbox.disabled = !this.checked;
+        if (!this.checked) {
+            generatePpkCheckbox.checked = false;
+        }
+    });
+    generatePpkCheckbox.disabled = !setupSshCheckbox.checked;
+
+
+    // --- Procesamiento del Envío del Formulario ---
+    form.addEventListener('submit', function(event) {
+        event.preventDefault(); // Prevenir el envío normal
+
+        if (!validateForm()) { // Llamar a la validación principal
+            // console.warn("Formulario inválido."); // Log interno
+            // Encontrar el primer error visible y enfocar su campo asociado
+            const firstError = document.querySelector('.error.visible');
+            if (firstError) {
+                 const inputId = firstError.id.replace('-error', '');
+                 const inputField = document.getElementById(inputId);
+                 if (inputField && typeof inputField.focus === 'function') {
+                     inputField.focus();
+                 } else if (firstError.id === 'privilegeLevel-error') {
+                     document.getElementById('privNone')?.focus();
+                 } else if (firstError.id === 'vlan-error') {
+                     document.querySelector('.vlan-checkbox')?.focus();
+                 }
+            }
+            return; // Detener si no es válido
+        }
+
+        // --- Si el formulario ES VÁLIDO, continuar ---
+        console.log("Formulario válido, generando JSON...");
+
+        const selectedPrivilege = document.querySelector('input[name="privilegeLevel"]:checked').value;
+
+        // Recoger VLANs: Ahora que sabemos que al menos una está marcada
+        const selectedVlans = [];
+         document.querySelectorAll('.vlan-checkbox:checked').forEach(checkbox => {
+            selectedVlans.push(checkbox.value);
+        });
+        // Determinar si se seleccionaron todas (para futuro uso, aunque ahora solo necesitamos el array)
+        const allVlansSelected = selectedVlans.length === vlanCheckboxes.length;
+
+
+        // --- Construir el objeto de datos ---
+        const userData = {
+            schemaVersion: "1.3", // Incrementar versión
+            timestamp: new Date().toISOString(),
+            requester: requesterNameInput.value.trim(),
+            username: usernameInput.value.trim(),
+            fullName: fullNameInput.value.trim() || null,
+            privileges: {
+                level: selectedPrivilege
+            },
+            networkAccess: {
+                // Decidimos guardar siempre el array, incluso si son todas.
+                // El backend puede comprobar `length === totalVlans` si necesita el estado "all"
+                allowedVlans: selectedVlans,
+                 // Opcional: añadir una bandera explícita si todas fueron seleccionadas
+                 // allVlansSelected: allVlansSelected
+            },
+            ssh: {
+                setup: setupSshCheckbox.checked,
+                generatePpk: generatePpkCheckbox.checked && setupSshCheckbox.checked
+            }
+        };
+
+        // Convertir a JSON
+        const jsonString = JSON.stringify(userData, null, 2);
+
+        // Mostrar JSON y enlace de descarga
+        jsonOutputPre.textContent = jsonString;
+        outputArea.classList.remove('hidden'); // Mostrar el área de salida
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        downloadLink.href = URL.createObjectURL(blob);
+        downloadLink.download = `${userData.username}_request_${new Date().getTime()}.json`;
+
+        // Simular envío/log
+        console.log("JSON generado:", userData);
+        alert('¡Solicitud válida! JSON generado y mostrado abajo.');
+
+        // Opcional: Limpiar form
+        // form.reset();
+        // hideAllErrors();
+        // outputArea.classList.add('hidden');
+        // vlanSelectToggle.textContent = 'Seleccionar Todas';
+        // generatePpkCheckbox.disabled = !setupSshCheckbox.checked;
+    });
+
+</script>
+
+</body>
+</html>
