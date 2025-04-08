@@ -1,0 +1,19 @@
+[Unit]
+Description=MTR Topology Service
+After=network.target influxdb.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/mtr-topology
+ExecStart=/opt/mtr-topology/venv/bin/python3 /opt/mtr-topology/main.py --config /opt/mtr-topology/config.json
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/mtr-topology
+
+[Install]
+WantedBy=multi-user.target
