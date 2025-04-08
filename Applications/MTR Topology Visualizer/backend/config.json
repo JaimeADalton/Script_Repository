@@ -1,0 +1,33 @@
+{
+  "logging": {
+    "log_file": "/var/log/mtr-topology/mtr_topology.log",
+    "log_level": "INFO",
+    "console": true
+  },
+  "storage": {
+    "host": "localhost",
+    "port": 8086,
+    "database": "mtr_topology",
+    "username": null,
+    "password": null
+  },
+  "mtr": {
+    "count": 3,
+    "timeout": 1.0,
+    "interval": 0.1,
+    "max_hops": 30,
+    "max_unknown_hops": 3,
+    "hop_sleep": 0.05,
+    "parallel_jobs": 5
+  },
+  "scan": {
+    "scan_interval": 300,
+    "discover_telegraf": true,
+    "telegraf_config_dir": "/etc/telegraf/telegraf.d"
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "debug": false
+  }
+}
