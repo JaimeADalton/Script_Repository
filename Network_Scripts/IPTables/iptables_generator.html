@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Reglas iptables</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #0056b3;
+            text-align: center;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .form-group {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            min-width: 150px; /* Alineación */
+            margin-right: 10px;
+        }
+        .form-group select,
+        .form-group input[type="text"],
+        .form-group input[type="number"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            flex-grow: 1; /* Ocupar espacio disponible */
+            min-width: 150px; /* Mínimo ancho */
+        }
+         .form-group input[type="checkbox"] {
+            margin-right: 5px;
+        }
+        .form-group .hint {
+            font-size: 0.9em;
+            color: #666;
+            margin-left: 10px;
+            cursor: help;
+            border-bottom: 1px dotted #999;
+            position: relative; /* Para el tooltip */
+        }
+         /* Tooltip Básico (puedes mejorarlo con JS o librerías) */
+        .form-group .hint::after {
+            content: attr(data-title); /* Usa el atributo data-title */
+            position: absolute;
+            left: 105%; /* Posición relativa al hint */
+            top: 0;
+            white-space: normal; /* Permitir saltos de línea */
+            min-width: 200px; /* Ancho mínimo */
+            max-width: 300px; /* Ancho máximo */
+            background-color: #555;
+            color: #fff;
+            text-align: left;
+            padding: 5px 10px;
+            border-radius: 6px;
+            z-index: 1;
+            opacity: 0; /* Oculto por defecto */
+            transition: opacity 0.3s;
+            pointer-events: none; /* No interactuar con el tooltip */
+            font-size: 0.85em;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .form-group .hint:hover::after {
+            opacity: 1; /* Mostrar al pasar el ratón */
+        }
+
+        .sub-options {
+            margin-left: 20px;
+            padding-left: 20px;
+            border-left: 2px solid #eee;
+            margin-top: 10px;
+            display: none; /* Oculto por defecto */
+        }
+        .sub-options.active {
+            display: block; /* Mostrar cuando esté activo */
+        }
+        #generated-command-section {
+            margin-top: 20px;
+        }
+        #generated-command {
+            width: 100%;
+            min-height: 80px;
+            font-family: monospace;
+            background-color: #e9e9e9;
+            border: 1px solid #ccc;
+            padding: 10px;
+            box-sizing: border-box;
+            white-space: pre-wrap; /* Conservar espacios y saltos */
+            word-wrap: break-word; /* Romper palabras largas */
+            resize: vertical;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #copy-button {
+            background-color: #28a745;
+        }
+        #copy-button:hover {
+            background-color: #218838;
+        }
+        .template-buttons button {
+            background-color: #ffc107;
+            color: #333;
+        }
+        .template-buttons button:hover {
+             background-color: #e0a800;
+        }
+        .checkbox-label {
+            display: inline-flex;
+            align-items: center;
+            margin-right: 15px; /* Espacio entre checkboxes */
+        }
+         .checkbox-label input[type="checkbox"] {
+             margin-right: 5px;
+         }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Generador de Reglas iptables</h1>
+
+        <div class="section" id="rule-builder">
+            <h2>Constructor de Reglas</h2>
+            <form id="iptables-form">
+                <!-- Información Básica -->
+                <div class="form-group">
+                    <label for="table">Tabla:</label>
+                    <select id="table" name="table">
+                        <option value="filter" selected>filter (por defecto)</option>
+                        <option value="nat">nat</option>
+                        <option value="mangle">mangle</option>
+                        <option value="raw">raw</option>
+                        <option value="security">security</option>
+                    </select>
+                    <span class="hint" data-title="La tabla define el propósito general de las reglas (filter: filtrar, nat: traducir direcciones, mangle: modificar paquetes, raw: excepciones de conntrack, security: SELinux). 'filter' es la más común.">?</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="command">Comando:</label>
+                    <select id="command" name="command">
+                        <option value="-A" selected>Añadir (-A)</option>
+                        <option value="-I">Insertar (-I)</option>
+                        <option value="-D">Borrar (-D)</option>
+                        <option value="-R">Reemplazar (-R)</option>
+                        <!-- Otros comandos como -P, -F, -Z, -N, -X se manejan mejor por separado -->
+                    </select>
+                     <span class="hint" data-title="Acción a realizar sobre la cadena o regla. -A: Añade al final. -I: Inserta al principio o en una posición. -D: Borra. -R: Reemplaza.">?</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="chain">Cadena:</label>
+                    <select id="chain" name="chain">
+                        <!-- Se llenará dinámicamente con JS -->
+                    </select>
+                     <span class="hint" data-title="La lista de reglas donde se aplicará el comando. Las opciones dependen de la tabla seleccionada (ej. INPUT, OUTPUT, FORWARD para 'filter').">?</span>
+                </div>
+
+                 <!-- Opciones para Insertar/Reemplazar/Borrar por número -->
+                <div class="form-group sub-options" id="rule-number-options">
+                     <label for="rule-number">Número Regla:</label>
+                    <input type="number" id="rule-number" name="rule-number" min="1" placeholder="(Opcional para -I, -R, -D)">
+                    <span class="hint" data-title="Para -I: posición donde insertar (1 es el principio). Para -R y -D: número de la regla a reemplazar/borrar. Si se omite en -I, inserta al principio. Si se omite en -D, borra por coincidencia de criterios.">?</span>
+                </div>
+
+                <!-- Concordancias (Matches) -->
+                <h3>Concordancias (Criterios)</h3>
+                <div class="form-group">
+                    <label for="protocol">Protocolo (-p):</label>
+                     <input type="checkbox" id="protocol-invert" name="protocol-invert">
+                     <label for="protocol-invert" class="checkbox-label">!</label>
+                    <select id="protocol" name="protocol">
+                        <option value="">Cualquiera</option>
+                        <option value="tcp">tcp</option>
+                        <option value="udp">udp</option>
+                        <option value="icmp">icmp</option>
+                        <option value="icmpv6">icmpv6</option>
+                        <option value="esp">esp</option>
+                        <option value="ah">ah</option>
+                        <option value="all">all (tcp,udp,icmp)</option>
+                        <!-- Añadir más si es necesario -->
+                    </select>
+                     <span class="hint" data-title="Filtra por protocolo específico. Seleccionar 'tcp', 'udp' o 'icmp' habilitará opciones adicionales más abajo. '!' invierte la selección.">?</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="source">IP Origen (-s):</label>
+                    <input type="checkbox" id="source-invert" name="source-invert">
+                     <label for="source-invert" class="checkbox-label">!</label>
+                    <input type="text" id="source" name="source" placeholder="Ej: 192.168.1.100 o 10.0.0.0/8">
+                    <span class="hint" data-title="Dirección IP o rango de red (formato CIDR) desde donde viene el paquete. '!' invierte (coincide con todo EXCEPTO esto).">?</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="destination">IP Destino (-d):</label>
+                     <input type="checkbox" id="destination-invert" name="destination-invert">
+                    <label for="destination-invert" class="checkbox-label">!</label>
+                    <input type="text" id="destination" name="destination" placeholder="Ej: 8.8.8.8 o 192.168.1.0/24">
+                    <span class="hint" data-title="Dirección IP o rango de red (formato CIDR) a donde va el paquete. '!' invierte la selección.">?</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="in-interface">Interfaz Entrada (-i):</label>
+                     <input type="checkbox" id="in-interface-invert" name="in-interface-invert">
+                     <label for="in-interface-invert" class="checkbox-label">!</label>
+                    <input type="text" id="in-interface" name="in-interface" placeholder="Ej: eth0, ppp+, ! lo">
+                     <span class="hint" data-title="Interfaz por la que entró el paquete. Usar '+' como comodín (ej. eth+). Solo válido en INPUT, FORWARD, PREROUTING. '!' invierte.">?</span>
+                </div>
+
+                 <div class="form-group">
+                    <label for="out-interface">Interfaz Salida (-o):</label>
+                    <input type="checkbox" id="out-interface-invert" name="out-interface-invert">
+                    <label for="out-interface-invert" class="checkbox-label">!</label>
+                    <input type="text" id="out-interface" name="out-interface" placeholder="Ej: eth1, ppp0, ! eth0">
+                     <span class="hint" data-title="Interfaz por la que saldrá el paquete. Usar '+' como comodín. Solo válido en OUTPUT, FORWARD, POSTROUTING. '!' invierte.">?</span>
+                </div>
+
+                <!-- Opciones Específicas de Protocolo -->
+                <div id="tcp-options" class="sub-options">
+                    <h4>Opciones TCP</h4>
+                    <div class="form-group">
+                        <label for="source-port">Puerto Origen (--sport):</label>
+                         <input type="checkbox" id="source-port-invert" name="source-port-invert">
+                         <label for="source-port-invert" class="checkbox-label">!</label>
+                        <input type="text" id="source-port" name="source-port" placeholder="Ej: 1024:65535, 80, 22">
+                        <span class="hint" data-title="Puerto TCP de origen. Puede ser un número, un nombre (/etc/services), o un rango (inicio:fin). '!' invierte.">?</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="destination-port">Puerto Destino (--dport):</label>
+                         <input type="checkbox" id="destination-port-invert" name="destination-port-invert">
+                         <label for="destination-port-invert" class="checkbox-label">!</label>
+                        <input type="text" id="destination-port" name="destination-port" placeholder="Ej: 80, 443, 1000:2000">
+                        <span class="hint" data-title="Puerto TCP de destino. Acepta números, nombres o rangos. '!' invierte.">?</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Flags TCP (--tcp-flags):</label>
+                         <input type="checkbox" id="tcp-flags-invert" name="tcp-flags-invert">
+                         <label for="tcp-flags-invert" class="checkbox-label">!</label>
+                        <input type="text" id="tcp-flags-mask" name="tcp-flags-mask" placeholder="Máscara (ej. SYN,ACK,FIN,RST)">
+                         <input type="text" id="tcp-flags-comp" name="tcp-flags-comp" placeholder="Comparar (ej. SYN)">
+                         <span class="hint" data-title="Compara flags TCP. Máscara: qué flags mirar. Comparar: qué flags deben estar activos. Ej: --tcp-flags SYN,ACK,FIN,RST SYN (solo SYN activo de los 4). '!' invierte.">?</span>
+                    </div>
+                     <div class="form-group">
+                        <label for="syn">--syn:</label>
+                        <input type="checkbox" id="syn" name="syn">
+                        <span class="hint" data-title="Abreviatura para --tcp-flags SYN,RST,ACK SYN. Marca el inicio de una conexión TCP.">?</span>
+                    </div>
+                     <!-- Añadir --tcp-option si se necesita -->
+                </div>
+
+                 <div id="udp-options" class="sub-options">
+                     <h4>Opciones UDP</h4>
+                     <div class="form-group">
+                         <label for="udp-source-port">Puerto Origen (--sport):</label>
+                          <input type="checkbox" id="udp-source-port-invert" name="udp-source-port-invert">
+                          <label for="udp-source-port-invert" class="checkbox-label">!</label>
+                         <input type="text" id="udp-source-port" name="udp-source-port" placeholder="Ej: 53, 1024:">
+                         <span class="hint" data-title="Puerto UDP de origen. Acepta números, nombres o rangos. '!' invierte.">?</span>
+                     </div>
+                     <div class="form-group">
+                         <label for="udp-destination-port">Puerto Destino (--dport):</label>
+                         <input type="checkbox" id="udp-destination-port-invert" name="udp-destination-port-invert">
+                          <label for="udp-destination-port-invert" class="checkbox-label">!</label>
+                         <input type="text" id="udp-destination-port" name="udp-destination-port" placeholder="Ej: 53, 161:162">
+                         <span class="hint" data-title="Puerto UDP de destino. Acepta números, nombres o rangos. '!' invierte.">?</span>
+                     </div>
+                 </div>
+
+                 <div id="icmp-options" class="sub-options">
+                     <h4>Opciones ICMP</h4>
+                     <div class="form-group">
+                         <label for="icmp-type">Tipo ICMP (--icmp-type):</label>
+                          <input type="checkbox" id="icmp-type-invert" name="icmp-type-invert">
+                          <label for="icmp-type-invert" class="checkbox-label">!</label>
+                         <input type="text" id="icmp-type" name="icmp-type" placeholder="Ej: echo-request, 8, 3/3">
+                          <span class="hint" data-title="Tipo ICMP a coincidir. Puede ser un nombre (ej. 'echo-request'), un número (ej. '8'), o tipo/código (ej. '3/0' para net-unreachable). Usa 'iptables -p icmp -h' para ver nombres. '!' invierte.">?</span>
+                     </div>
+                 </div>
+
+                <!-- Matches Ext explícitos (-m) -->
+                <h3>Concordancias Explícitas (-m)</h3>
+                 <div class="form-group">
+                     <label for="match-module">Módulo Match (-m):</label>
+                     <select id="match-module" name="match-module">
+                         <option value="">Ninguno</option>
+                         <option value="state">state</option>
+                         <option value="conntrack">conntrack</option>
+                         <option value="limit">limit</option>
+                         <option value="multiport">multiport</option>
+                         <option value="mac">mac</option>
+                         <option value="owner">owner</option>
+                         <option value="comment">comment</option>
+                         <option value="recent">recent</option>
+                         <option value="iprange">iprange</option>
+                         <option value="length">length</option>
+                         <option value="tcpmss">tcpmss</option>
+                         <option value="tos">tos</option>
+                         <option value="dscp">dscp</option>
+                         <option value="helper">helper</option>
+                         <!-- Añadir más según sea necesario -->
+                     </select>
+                      <span class="hint" data-title="Carga un módulo de concordancia explícito para habilitar opciones adicionales.">?</span>
+                 </div>
+
+                <!-- Opciones para Matches Explícitos (Dinámico) -->
+                <div id="match-options-container">
+                    <div id="state-match-options" class="sub-options">
+                        <h4>Opciones State</h4>
+                        <div class="form-group">
+                            <label for="state-state">Estado (--state):</label>
+                             <input type="checkbox" id="state-state-invert" name="state-state-invert">
+                             <label for="state-state-invert" class="checkbox-label">!</label>
+                             <input type="text" id="state-state" name="state-state" placeholder="Ej: ESTABLISHED,RELATED">
+                             <span class="hint" data-title="Estados de conexión a coincidir, separados por comas: NEW, ESTABLISHED, RELATED, INVALID, UNTRACKED. '!' invierte.">?</span>
+                        </div>
+                    </div>
+                     <div id="limit-match-options" class="sub-options">
+                         <h4>Opciones Limit</h4>
+                         <div class="form-group">
+                             <label for="limit-limit">Tasa (--limit):</label>
+                             <input type="text" id="limit-limit" name="limit-limit" placeholder="Ej: 5/minute, 10/second">
+                             <span class="hint" data-title="Tasa promedio máxima de coincidencias permitida (ej. '3/hour'). Default: 3/hour.">?</span>
+                         </div>
+                         <div class="form-group">
+                             <label for="limit-burst">Ráfaga (--limit-burst):</label>
+                             <input type="number" id="limit-burst" name="limit-burst" min="1" placeholder="Default: 5">
+                              <span class="hint" data-title="Número máximo de coincidencias iniciales antes de aplicar la tasa límite. Default: 5.">?</span>
+                         </div>
+                     </div>
+                     <div id="multiport-match-options" class="sub-options">
+                         <h4>Opciones Multiport</h4>
+                         <div class="form-group">
+                             <label for="multiport-sports">Puertos Origen (--sports):</label>
+                             <input type="text" id="multiport-sports" name="multiport-sports" placeholder="Ej: 22,80,1000:2000">
+                             <span class="hint" data-title="Lista de puertos/rangos TCP/UDP origen, separados por comas (máx 15).">?</span>
+                         </div>
+                          <div class="form-group">
+                             <label for="multiport-dports">Puertos Destino (--dports):</label>
+                             <input type="text" id="multiport-dports" name="multiport-dports" placeholder="Ej: 80,443,3128">
+                              <span class="hint" data-title="Lista de puertos/rangos TCP/UDP destino, separados por comas (máx 15).">?</span>
+                         </div>
+                         <div class="form-group">
+                             <label for="multiport-ports">Ambos Puertos (--ports):</label>
+                             <input type="text" id="multiport-ports" name="multiport-ports" placeholder="Ej: 53,123">
+                             <span class="hint" data-title="Coincide si el puerto origen Y el puerto destino están en la lista (máx 15).">?</span>
+                         </div>
+                     </div>
+                     <div id="mac-match-options" class="sub-options">
+                        <h4>Opciones MAC</h4>
+                        <div class="form-group">
+                            <label for="mac-source">MAC Origen (--mac-source):</label>
+                            <input type="checkbox" id="mac-source-invert" name="mac-source-invert">
+                            <label for="mac-source-invert" class="checkbox-label">!</label>
+                             <input type="text" id="mac-source" name="mac-source" placeholder="XX:XX:XX:XX:XX:XX">
+                            <span class="hint" data-title="Dirección MAC Ethernet de origen. Solo útil en INPUT, FORWARD, PREROUTING. '!' invierte.">?</span>
+                        </div>
+                    </div>
+                     <div id="owner-match-options" class="sub-options">
+                         <h4>Opciones Owner (Solo OUTPUT)</h4>
+                         <div class="form-group">
+                             <label for="owner-uid">UID Owner (--uid-owner):</label>
+                             <input type="number" id="owner-uid" name="owner-uid" min="0" placeholder="ID de Usuario">
+                             <span class="hint" data-title="Coincide si el paquete fue creado por un proceso con este User ID.">?</span>
+                         </div>
+                         <div class="form-group">
+                             <label for="owner-gid">GID Owner (--gid-owner):</label>
+                             <input type="number" id="owner-gid" name="owner-gid" min="0" placeholder="ID de Grupo">
+                             <span class="hint" data-title="Coincide si el paquete fue creado por un proceso con este Group ID.">?</span>
+                         </div>
+                     </div>
+                     <div id="comment-match-options" class="sub-options">
+                         <h4>Opciones Comment</h4>
+                         <div class="form-group">
+                            <label for="comment-comment">Comentario (--comment):</label>
+                             <input type="text" id="comment-comment" name="comment-comment" maxlength="256" placeholder="Texto del comentario">
+                             <span class="hint" data-title="Añade un comentario a la regla (no afecta al filtrado, útil para iptables-save). Máx 256 caracteres.">?</span>
+                         </div>
+                     </div>
+                     <!-- Añadir más contenedores para otros matches explícitos -->
+                </div>
+
+
+                <!-- Objetivo (Target) / Salto (Jump) -->
+                 <h3>Objetivo / Salto (-j)</h3>
+                <div class="form-group">
+                    <label for="target">Objetivo/Salto (-j):</label>
+                    <select id="target" name="target">
+                        <option value="ACCEPT" selected>ACCEPT</option>
+                        <option value="DROP">DROP</option>
+                        <option value="REJECT">REJECT</option>
+                        <option value="LOG">LOG</option>
+                        <option value="RETURN">RETURN</option>
+                        <option value="QUEUE">QUEUE</option>
+                        <option value="NFQUEUE">NFQUEUE</option>
+                        <!-- Opciones NAT (solo tabla nat) -->
+                         <option value="SNAT" data-table="nat">SNAT (solo nat)</option>
+                        <option value="DNAT" data-table="nat">DNAT (solo nat)</option>
+                        <option value="MASQUERADE" data-table="nat">MASQUERADE (solo nat)</option>
+                        <option value="REDIRECT" data-table="nat">REDIRECT (solo nat)</option>
+                        <!-- Opciones Mangle (solo tabla mangle) -->
+                         <option value="MARK" data-table="mangle">MARK (solo mangle)</option>
+                         <option value="CONNMARK" data-table="mangle">CONNMARK (solo mangle)</option>
+                         <option value="TOS" data-table="mangle">TOS (solo mangle)</option>
+                         <option value="DSCP" data-table="mangle">DSCP (solo mangle)</option>
+                         <option value="TTL" data-table="mangle">TTL (solo mangle)</option>
+                         <option value="TCPMSS" data-table="mangle">TCPMSS (solo mangle)</option>
+                          <!-- Opción Raw (solo tabla raw) -->
+                        <option value="NOTRACK" data-table="raw">NOTRACK (solo raw)</option>
+                         <!-- Añadir más según sea necesario -->
+                        <option value="jump">Saltar a cadena...</option>
+                    </select>
+                    <input type="text" id="jump-target" name="jump-target" placeholder="Nombre de cadena destino" style="display: none;">
+                    <span class="hint" data-title="La acción a realizar si el paquete coincide: ACCEPT (permitir), DROP (descartar), REJECT (rechazar con error), LOG (registrar), RETURN (volver a cadena anterior), o saltar a otra cadena. Otros objetivos dependen de la tabla.">?</span>
+                </div>
+
+                <!-- Opciones Específicas de Target (Dinámico) -->
+                 <div id="target-options-container">
+                     <div id="REJECT-target-options" class="sub-options">
+                        <h4>Opciones REJECT</h4>
+                        <div class="form-group">
+                            <label for="reject-with">Rechazar con (--reject-with):</label>
+                            <select id="reject-with" name="reject-with">
+                                <option value="icmp-port-unreachable" selected>icmp-port-unreachable (default)</option>
+                                <option value="icmp-net-unreachable">icmp-net-unreachable</option>
+                                <option value="icmp-host-unreachable">icmp-host-unreachable</option>
+                                <option value="icmp-proto-unreachable">icmp-proto-unreachable</option>
+                                <option value="icmp-net-prohibited">icmp-net-prohibited</option>
+                                <option value="icmp-host-prohibited">icmp-host-prohibited</option>
+                                <option value="tcp-reset">tcp-reset (solo TCP)</option>
+                            </select>
+                             <span class="hint" data-title="Tipo de mensaje de error ICMP (o TCP RST) a enviar al remitente cuando se rechaza el paquete.">?</span>
+                        </div>
+                    </div>
+                     <div id="LOG-target-options" class="sub-options">
+                         <h4>Opciones LOG</h4>
+                         <div class="form-group">
+                             <label for="log-prefix">Prefijo (--log-prefix):</label>
+                             <input type="text" id="log-prefix" name="log-prefix" maxlength="29" placeholder="Texto del prefijo">
+                              <span class="hint" data-title="Texto (máx 29 chars) que se antepone a cada mensaje de log generado por esta regla.">?</span>
+                         </div>
+                         <div class="form-group">
+                             <label for="log-level">Nivel (--log-level):</label>
+                             <select id="log-level" name="log-level">
+                                 <option value="warning" selected>warning (default)</option>
+                                 <option value="debug">debug</option>
+                                 <option value="info">info</option>
+                                 <option value="notice">notice</option>
+                                 <option value="err">err</option>
+                                 <option value="crit">crit</option>
+                                 <option value="alert">alert</option>
+                                 <option value="emerg">emerg</option>
+                             </select>
+                            <span class="hint" data-title="Nivel de prioridad de syslog para los mensajes generados (ver syslog.conf).">?</span>
+                         </div>
+                          <div class="form-group">
+                              <label>Opciones Adicionales:</label>
+                              <div class="checkbox-label">
+                                 <input type="checkbox" id="log-tcp-sequence" name="log-tcp-sequence"> TCP Sequence
+                              </div>
+                              <div class="checkbox-label">
+                                  <input type="checkbox" id="log-tcp-options" name="log-tcp-options"> TCP Options
+                              </div>
+                               <div class="checkbox-label">
+                                  <input type="checkbox" id="log-ip-options" name="log-ip-options"> IP Options
+                              </div>
+                              <span class="hint" data-title="Incluir números de secuencia TCP, opciones TCP u opciones IP en el mensaje de log.">?</span>
+                          </div>
+                     </div>
+                      <div id="SNAT-target-options" class="sub-options">
+                        <h4>Opciones SNAT (Tabla nat, POSTROUTING)</h4>
+                        <div class="form-group">
+                            <label for="snat-to-source">IP Origen (--to-source):</label>
+                            <input type="text" id="snat-to-source" name="snat-to-source" placeholder="ip[-ip][:puerto-puerto]">
+                            <span class="hint" data-title="IP(s) y opcionalmente puerto(s) a usar como origen. Ej: 1.2.3.4, 1.2.3.4-1.2.3.10, 1.2.3.4:1024-32000.">?</span>
+                        </div>
+                    </div>
+                     <div id="DNAT-target-options" class="sub-options">
+                         <h4>Opciones DNAT (Tabla nat, PREROUTING/OUTPUT)</h4>
+                         <div class="form-group">
+                             <label for="dnat-to-destination">IP Destino (--to-destination):</label>
+                             <input type="text" id="dnat-to-destination" name="dnat-to-destination" placeholder="ip[-ip][:puerto-puerto]">
+                              <span class="hint" data-title="IP(s) y opcionalmente puerto(s) a los que redirigir el tráfico. Ej: 192.168.1.100, 192.168.1.100:8080.">?</span>
+                         </div>
+                     </div>
+                    <div id="MASQUERADE-target-options" class="sub-options">
+                        <h4>Opciones MASQUERADE (Tabla nat, POSTROUTING)</h4>
+                        <div class="form-group">
+                            <label for="masquerade-to-ports">Puertos Origen (--to-ports):</label>
+                            <input type="text" id="masquerade-to-ports" name="masquerade-to-ports" placeholder="puerto[-puerto]">
+                             <span class="hint" data-title="Opcional: Rango de puertos origen a utilizar para las conexiones enmascaradas.">?</span>
+                        </div>
+                    </div>
+                     <div id="REDIRECT-target-options" class="sub-options">
+                        <h4>Opciones REDIRECT (Tabla nat, PREROUTING/OUTPUT)</h4>
+                        <div class="form-group">
+                            <label for="redirect-to-ports">Puertos Destino (--to-ports):</label>
+                            <input type="text" id="redirect-to-ports" name="redirect-to-ports" placeholder="puerto[-puerto]">
+                            <span class="hint" data-title="Puerto(s) en la máquina local al que redirigir el tráfico. Ej: 8080, 3128.">?</span>
+                        </div>
+                    </div>
+                     <div id="MARK-target-options" class="sub-options">
+                        <h4>Opciones MARK (Tabla mangle)</h4>
+                        <div class="form-group">
+                            <label for="mark-set-mark">Establecer Marca (--set-mark):</label>
+                            <input type="text" id="mark-set-mark" name="mark-set-mark" placeholder="valor[/mascara]">
+                             <span class="hint" data-title="Establece una marca entera en el paquete (dentro del kernel). Ej: 1, 0x10, 2/2.">?</span>
+                        </div>
+                    </div>
+                     <!-- Añadir más contenedores para otros targets -->
+                 </div>
+
+                <button type="button" id="generate-button">Generar Comando</button>
+                 <button type="reset">Limpiar Formulario</button>
+            </form>
+        </div>
+
+        <div class="section" id="generated-command-section">
+            <h2>Comando Generado</h2>
+            <textarea id="generated-command" readonly placeholder="El comando iptables generado aparecerá aquí..."></textarea>
+            <button id="copy-button">Copiar Comando</button>
+        </div>
+
+        <div class="section template-buttons">
+             <h2>Plantillas Comunes</h2>
+             <button type="button" data-template="basic-fw">Firewall Básico Stateful</button>
+             <button type="button" data-template="masquerade">Gateway con Masquerade</button>
+             <button type="button" data-template="port-forward">Redirección de Puerto (HTTP)</button>
+             <button type="button" data-template="allow-ssh">Permitir SSH Entrante</button>
+        </div>
+
+         <div class="section">
+             <h2>Advertencia</h2>
+             <p><strong>Usa los comandos generados bajo tu propio riesgo.</strong> Una configuración incorrecta de iptables puede bloquear el acceso a tu sistema o dejarlo vulnerable. Revisa y comprende cada comando antes de ejecutarlo.</p>
+         </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('iptables-form');
+        const tableSelect = document.getElementById('table');
+        const commandSelect = document.getElementById('command');
+        const chainSelect = document.getElementById('chain');
+        const protocolSelect = document.getElementById('protocol');
+        const matchModuleSelect = document.getElementById('match-module');
+        const targetSelect = document.getElementById('target');
+        const jumpTargetInput = document.getElementById('jump-target');
+        const generatedCommandTextarea = document.getElementById('generated-command');
+        const generateButton = document.getElementById('generate-button');
+        const copyButton = document.getElementById('copy-button');
+        const templateButtons = document.querySelectorAll('.template-buttons button');
+        const ruleNumberOptions = document.getElementById('rule-number-options');
+
+        const chainsByTable = {
+            filter: ['INPUT', 'OUTPUT', 'FORWARD'],
+            nat: ['PREROUTING', 'OUTPUT', 'POSTROUTING'],
+            mangle: ['PREROUTING', 'INPUT', 'FORWARD', 'OUTPUT', 'POSTROUTING'],
+            raw: ['PREROUTING', 'OUTPUT'],
+            security: ['INPUT', 'OUTPUT', 'FORWARD']
+        };
+
+        function updateChains() {
+            const selectedTable = tableSelect.value;
+            const chains = chainsByTable[selectedTable] || [];
+            chainSelect.innerHTML = ''; // Clear existing options
+            chains.forEach(chain => {
+                const option = document.createElement('option');
+                option.value = chain;
+                option.textContent = chain;
+                chainSelect.appendChild(option);
+            });
+            // Add option for custom chain if command allows (e.g., -A, -I to custom)
+            // For simplicity, we allow it always, user must know the chain exists
+            const customOption = document.createElement('option');
+            customOption.value = 'custom';
+            customOption.textContent = 'Cadena Personalizada...';
+            chainSelect.appendChild(customOption);
+
+            updateTargetOptionsVisibility(); // Update targets based on table
+             if (chainSelect.value === 'custom') {
+                 promptForCustomChain();
+             } else {
+                  const customChainInput = document.getElementById('custom-chain-name');
+                  if (customChainInput) customChainInput.remove();
+             }
+        }
+
+         function promptForCustomChain() {
+             const existingInput = document.getElementById('custom-chain-name');
+             if (existingInput) return; // Only add once
+
+             const input = document.createElement('input');
+             input.type = 'text';
+             input.id = 'custom-chain-name';
+             input.name = 'custom-chain-name';
+             input.placeholder = 'Nombre de cadena personalizada';
+             input.style.marginLeft = '10px';
+             chainSelect.parentNode.insertBefore(input, chainSelect.nextSibling);
+             input.addEventListener('input', generateCommand); // Regenerate on typing
+         }
+
+
+        function updateUIElements() {
+            const selectedProtocol = protocolSelect.value;
+            const selectedMatchModule = matchModuleSelect.value;
+            const selectedTarget = targetSelect.value;
+            const selectedCommand = commandSelect.value;
+
+            // Show/Hide Protocol Specific Options
+            document.getElementById('tcp-options').classList.toggle('active', selectedProtocol === 'tcp');
+            document.getElementById('udp-options').classList.toggle('active', selectedProtocol === 'udp');
+            document.getElementById('icmp-options').classList.toggle('active', selectedProtocol === 'icmp' || selectedProtocol === 'icmpv6');
+
+            // Show/Hide Explicit Match Options
+            document.querySelectorAll('#match-options-container > div').forEach(div => {
+                div.classList.remove('active');
+            });
+            if (selectedMatchModule) {
+                const optionsDiv = document.getElementById(`${selectedMatchModule}-match-options`);
+                if (optionsDiv) optionsDiv.classList.add('active');
+            }
+
+             // Show/Hide Target Specific Options
+             document.querySelectorAll('#target-options-container > div').forEach(div => {
+                 div.classList.remove('active');
+             });
+             const targetOptionsDiv = document.getElementById(`${selectedTarget}-target-options`);
+             if (targetOptionsDiv) targetOptionsDiv.classList.add('active');
+
+
+            // Show/Hide Jump Target Input
+            jumpTargetInput.style.display = (selectedTarget === 'jump') ? 'inline-block' : 'none';
+            if (selectedTarget !== 'jump') jumpTargetInput.value = ''; // Clear if not jump
+
+             // Show/Hide Rule Number Input
+             ruleNumberOptions.style.display = ['-I', '-R', '-D'].includes(selectedCommand) ? 'flex' : 'none';
+             if (!['-I', '-R', '-D'].includes(selectedCommand)) {
+                document.getElementById('rule-number').value = '';
+             }
+
+             // Handle custom chain input visibility
+             const customChainInput = document.getElementById('custom-chain-name');
+             if (chainSelect.value !== 'custom' && customChainInput) {
+                 customChainInput.remove();
+             } else if (chainSelect.value === 'custom' && !customChainInput) {
+                 promptForCustomChain();
+             }
+
+            generateCommand(); // Regenerate command whenever UI changes
+        }
+
+        function updateTargetOptionsVisibility() {
+            const selectedTable = tableSelect.value;
+            const targetOptions = targetSelect.options;
+
+            for (let i = 0; i < targetOptions.length; i++) {
+                const option = targetOptions[i];
+                const requiredTable = option.getAttribute('data-table');
+                // Show if no table requirement OR if the table matches
+                option.style.display = (!requiredTable || requiredTable === selectedTable) ? '' : 'none';
+            }
+
+            // If current selection is now hidden, reset to default (ACCEPT)
+            if (targetSelect.options[targetSelect.selectedIndex].style.display === 'none') {
+                targetSelect.value = 'ACCEPT';
+            }
+        }
+
+
+        function generateCommand() {
+            let command = 'iptables';
+
+            // Table
+            const table = tableSelect.value;
+            if (table !== 'filter') {
+                command += ` -t ${table}`;
+            }
+
+            // Command and Chain
+            const cmd = commandSelect.value;
+            let chain = chainSelect.value;
+            if (chain === 'custom') {
+                chain = document.getElementById('custom-chain-name')?.value.trim() || 'SU_CADENA'; // Placeholder if empty
+            }
+
+             // Rule Number (for -I, -R, -D)
+             const ruleNumInput = document.getElementById('rule-number');
+             const ruleNum = ruleNumInput.value.trim();
+             if (['-I', '-R', '-D'].includes(cmd) && ruleNum) {
+                command += ` ${cmd} ${chain} ${ruleNum}`;
+             } else if (cmd === '-D' && !ruleNum) {
+                 // Delete by match - just add command and chain for now
+                 command += ` ${cmd} ${chain}`;
+             }
+             else {
+                 command += ` ${cmd} ${chain}`;
+             }
+
+
+            // --- Matches ---
+            function addMatch(optionElementId, cmdOption) {
+                const element = document.getElementById(optionElementId);
+                const value = element?.value.trim();
+                 const invert = document.getElementById(`${optionElementId}-invert`)?.checked;
+                if (value) {
+                    command += ` ${invert ? '! ' : ''}${cmdOption} ${value}`;
+                }
+            }
+
+             addMatch('protocol', '-p');
+             addMatch('source', '-s');
+             addMatch('destination', '-d');
+             addMatch('in-interface', '-i');
+             addMatch('out-interface', '-o');
+
+            // Protocol Specific Matches
+            const protocol = protocolSelect.value;
+            if (protocol === 'tcp') {
+                 addMatch('source-port', '--sport');
+                 addMatch('destination-port', '--dport');
+                 const flagsMask = document.getElementById('tcp-flags-mask').value.trim();
+                 const flagsComp = document.getElementById('tcp-flags-comp').value.trim();
+                 const flagsInvert = document.getElementById('tcp-flags-invert').checked;
+                 if (flagsMask && flagsComp) {
+                     command += ` ${flagsInvert ? '! ' : ''}--tcp-flags ${flagsMask} ${flagsComp}`;
+                 }
+                 if (document.getElementById('syn').checked) {
+                     command += ' --syn'; // Add --syn if checked
+                 }
+            } else if (protocol === 'udp') {
+                 addMatch('udp-source-port', '--sport');
+                 addMatch('udp-destination-port', '--dport');
+            } else if (protocol === 'icmp' || protocol === 'icmpv6') {
+                 addMatch('icmp-type', '--icmp-type');
+            }
+
+             // Explicit Matches
+            const matchModule = matchModuleSelect.value;
+            if (matchModule) {
+                 command += ` -m ${matchModule}`;
+                 switch(matchModule) {
+                     case 'state':
+                         addMatch('state-state', '--state');
+                         break;
+                     case 'limit':
+                         addMatch('limit-limit', '--limit');
+                         addMatch('limit-burst', '--limit-burst');
+                         break;
+                      case 'multiport':
+                         addMatch('multiport-sports', '--sports');
+                         addMatch('multiport-dports', '--dports');
+                         addMatch('multiport-ports', '--ports');
+                         break;
+                     case 'mac':
+                         addMatch('mac-source', '--mac-source');
+                         break;
+                     case 'owner':
+                         addMatch('owner-uid', '--uid-owner');
+                         addMatch('owner-gid', '--gid-owner');
+                          break;
+                    case 'comment':
+                         const commentText = document.getElementById('comment-comment').value.trim();
+                         if (commentText) {
+                            // Need to quote comments properly
+                            command += ` --comment "${commentText.replace(/"/g, '\\"')}"`;
+                         }
+                         break;
+                     // Add cases for other explicit matches here...
+                 }
+            }
+
+             // --- Target / Jump ---
+            const target = targetSelect.value;
+            if (target === 'jump') {
+                 const jumpTarget = jumpTargetInput.value.trim();
+                 if (jumpTarget) {
+                    command += ` -j ${jumpTarget}`;
+                 } else {
+                     command += ' -j SU_CADENA_DESTINO'; // Placeholder
+                 }
+            } else {
+                 command += ` -j ${target}`;
+                 // Target Specific Options
+                 switch(target) {
+                     case 'REJECT':
+                         const rejectWith = document.getElementById('reject-with').value;
+                         if (rejectWith !== 'icmp-port-unreachable') { // Only add if not default
+                             command += ` --reject-with ${rejectWith}`;
+                         }
+                         break;
+                    case 'LOG':
+                         addMatch('log-prefix', '--log-prefix'); // Reusing addMatch logic slightly
+                         const logLevel = document.getElementById('log-level').value;
+                          if (logLevel !== 'warning') {
+                             command += ` --log-level ${logLevel}`;
+                         }
+                         if (document.getElementById('log-tcp-sequence').checked) command += ' --log-tcp-sequence';
+                         if (document.getElementById('log-tcp-options').checked) command += ' --log-tcp-options';
+                         if (document.getElementById('log-ip-options').checked) command += ' --log-ip-options';
+                         break;
+                    case 'SNAT':
+                         addMatch('snat-to-source', '--to-source');
+                         break;
+                    case 'DNAT':
+                         addMatch('dnat-to-destination', '--to-destination');
+                         break;
+                    case 'MASQUERADE':
+                         addMatch('masquerade-to-ports', '--to-ports');
+                         break;
+                    case 'REDIRECT':
+                         addMatch('redirect-to-ports', '--to-ports');
+                         break;
+                    case 'MARK':
+                         addMatch('mark-set-mark', '--set-mark');
+                         break;
+                     // Add cases for other target options here...
+                 }
+            }
+
+
+            generatedCommandTextarea.value = command.trim(); // Update the text area
+        }
+
+        function copyCommand() {
+            generatedCommandTextarea.select();
+            navigator.clipboard.writeText(generatedCommandTextarea.value)
+                .then(() => {
+                    copyButton.textContent = '¡Copiado!';
+                    setTimeout(() => { copyButton.textContent = 'Copiar Comando'; }, 2000);
+                })
+                .catch(err => {
+                    console.error('Error al copiar: ', err);
+                    copyButton.textContent = 'Error al copiar';
+                     setTimeout(() => { copyButton.textContent = 'Copiar Comando'; }, 2000);
+                });
+        }
+
+        function applyTemplate(templateName) {
+             // Reset form first
+             form.reset();
+
+             // Set values based on template
+             switch(templateName) {
+                 case 'basic-fw':
+                     // Policy DROP Example (Need separate UI for policies)
+                     // Instead, let's add the common ESTABLISHED,RELATED rule
+                     tableSelect.value = 'filter';
+                     commandSelect.value = '-A';
+                     chainSelect.value = 'INPUT'; // Apply to INPUT and FORWARD usually
+                     matchModuleSelect.value = 'state';
+                     document.getElementById('state-state').value = 'ESTABLISHED,RELATED';
+                     targetSelect.value = 'ACCEPT';
+                     // Also need rules for FORWARD chain and policy setting - complex for simple template
+                     alert("Plantilla básica: Añade reglas -P DROP y permite ESTABLISHED,RELATED. Generando regla para INPUT.");
+                     break;
+                 case 'masquerade':
+                     tableSelect.value = 'nat';
+                     commandSelect.value = '-A';
+                     updateChains(); // Update chains for nat table
+                     chainSelect.value = 'POSTROUTING';
+                     document.getElementById('out-interface').value = 'eth0'; // Example interface
+                     targetSelect.value = 'MASQUERADE';
+                     alert("Plantilla Masquerade: Asegúrate de cambiar '-o eth0' a tu interfaz WAN y activa ip_forward.");
+                     break;
+                 case 'port-forward':
+                     tableSelect.value = 'nat';
+                     commandSelect.value = '-A';
+                     updateChains();
+                     chainSelect.value = 'PREROUTING';
+                     document.getElementById('in-interface').value = 'eth0'; // Example WAN interface
+                     document.getElementById('destination').value = 'TU_IP_PUBLICA'; // Placeholder
+                     protocolSelect.value = 'tcp';
+                     document.getElementById('destination-port').value = '80';
+                     targetSelect.value = 'DNAT';
+                     document.getElementById('dnat-to-destination').value = 'IP_INTERNA:80'; // Placeholder
+                      // Also need filter FORWARD rule
+                     alert("Plantilla Port Forward: Cambia interfaces, IP pública e IP interna. Necesitarás una regla FORWARD en la tabla 'filter' para permitir el tráfico.");
+                     break;
+                 case 'allow-ssh':
+                     tableSelect.value = 'filter';
+                     commandSelect.value = '-A';
+                     chainSelect.value = 'INPUT';
+                     protocolSelect.value = 'tcp';
+                     document.getElementById('destination-port').value = '22';
+                     matchModuleSelect.value = 'state';
+                      document.getElementById('state-state').value = 'NEW,ESTABLISHED,RELATED'; // Allow new SSH
+                     targetSelect.value = 'ACCEPT';
+                     alert("Plantilla Permitir SSH: Permite conexiones SSH entrantes. Considera restringir la IP origen (-s).");
+                     break;
+             }
+
+             // Update UI based on new selections and generate command
+             updateUIElements();
+        }
+
+
+        // Initial Setup
+        tableSelect.addEventListener('change', () => { updateChains(); updateUIElements(); });
+        chainSelect.addEventListener('change', () => { updateUIElements(); }); // Update on chain change too
+        form.addEventListener('input', generateCommand); // Regenerate on any input change
+        form.addEventListener('change', updateUIElements); // Update UI on select/checkbox change
+        generateButton.addEventListener('click', generateCommand);
+        copyButton.addEventListener('click', copyCommand);
+        templateButtons.forEach(button => {
+             button.addEventListener('click', () => applyTemplate(button.dataset.template));
+        });
+
+
+        // Initialize
+        updateChains();
+        updateUIElements(); // Set initial visibility based on defaults
+        generateCommand(); // Generate initial command based on defaults
+
+
+    </script>
+</body>
+</html>
