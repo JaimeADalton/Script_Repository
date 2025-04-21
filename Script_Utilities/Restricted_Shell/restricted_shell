@@ -1,5 +1,6 @@
 #!/bin/bash
 clear
+# Ignorar Ctrl‑C
 trap '' INT
 
 # ---------------------- Funciones auxiliares ----------------------------
@@ -11,11 +12,9 @@ ip2int() {
 }
 
 ip_in_cidr() {
-    local ip="$1"
-    local cidr="$2"
+    local ip="$1" cidr="$2"
     local base bits ip_int base_int mask
-    base=${cidr%/*}
-    bits=${cidr#*/}
+    base=${cidr%/*}; bits=${cidr#*/}
     ip_int=$(ip2int "$ip")
     base_int=$(ip2int "$base")
     mask=$(( 0xFFFFFFFF << (32 - bits) & 0xFFFFFFFF ))
@@ -24,7 +23,7 @@ ip_in_cidr() {
 
 get_route_for_ip() {
     local ip="$1"
-    ip route get "$ip" 2>/dev/null | awk '{print $3}' | head -n 1
+    ip route get "$ip" 2>/dev/null | awk '{print $3; exit}'
 }
 
 print_banner() {
@@ -36,117 +35,114 @@ print_banner() {
 }
 
 print_help() {
-    echo "================= Restricted Shell ================="
-    echo "Este shell permite ejecutar los siguientes comandos:"
-    echo "  ping       - Enviar paquetes ICMP."
-    echo "  ssh        - Acceder a otros servidores vía SSH."
-    echo "  plink      - Herramienta similar a ssh."
-    echo "  telnet     - Conectar a servicios mediante Telnet."
-    echo "  tracepath  - Trazar ruta de red a un destino."
-    echo "  mtr        - Combinación de ping y traceroute."
-    echo "  exit       - Salir del shell."
-    echo "  help       - Mostrar esta ayuda."
-    echo "------------------------------------------------------"
-    echo "Las restricciones de acceso se aplican según políticas internas."
-    echo "------------------------------------------------------"
+    cat <<EOF
+================= Restricted Shell =================
+Este shell permite ejecutar los siguientes comandos:
+  ping       - Enviar paquetes ICMP.
+  ssh        - Acceder a otros servidores vía SSH.
+  plink      - Herramienta similar a ssh.
+  telnet     - Conectar a servicios mediante Telnet.
+  tracepath  - Trazar ruta de red a un destino.
+  mtr        - Combinación de ping y traceroute.
+  exit       - Salir del shell.
+  help       - Mostrar esta ayuda.
+------------------------------------------------------
+Las restricciones de acceso se aplican según políticas internas.
+------------------------------------------------------
+EOF
 }
 
 # ---------------------- Configuración Inicial ----------------------------
 
+# Fuente de IP de quien se conecta
 if [[ -n "$SSH_CONNECTION" ]]; then
-    IP=$(awk '{print $1, $2}' <<< "$SSH_CONNECTION")
+    IP=${SSH_CONNECTION%% *}
 else
     IP="localhost"
 fi
 
 allowed_commands=(ping ssh plink telnet tracepath mtr exit help)
-
-# Redes que NO pueden ser accedidas.
-restricted_networks=()
-
-# Lista de rutas de salida permitidas (si la ruta de salida no está aquí, se bloquea)
+restricted_networks=()            # CIDRs totalmente bloqueados
 allowed_routes=("vlan199" "192.168.99.1" "vlan2")
+
+# Abrimos descriptor 3 apuntando al terminal real
+exec 3</dev/tty
 
 print_banner
 
 # ---------------------- Bucle Principal ----------------------------------
 
 while true; do
-    read -r -e -p "Restricted: $ " user_command
+    # Leer siempre desde /dev/tty; si falla (EOF), salimos limpiamente
+    if ! read -u 3 -r -e -p "Restricted: $ " user_command; then
+        echo
+        echo "Adiós."
+        break
+    fi
+
+    # Si comando vacío, volvemos a leer
     [[ -z "$user_command" ]] && continue
 
-    echo "[ $(date +"%d/%m/%y %T") ] Host: $IP -- $user_command" >> /var/log/restricted_shell.log
+    # Loguear
+    printf "[ %s ] Host: %s -- %s\n" "$(date +"%d/%m/%y %T")" "$IP" "$user_command" \
+      >> /var/log/restricted_shell.log
 
-    # Separa la entrada en tokens.
+    # Separar tokens
     read -r -a tokens <<< "$user_command"
-    command_name="${tokens[0]}"
+    cmd=${tokens[0]}
 
-    # Verifica que el comando esté en la lista permitida.
+    # Verificar comando permitido
     valid=false
-    for allowed in "${allowed_commands[@]}"; do
-        if [[ "$command_name" == "$allowed" ]]; then
-            valid=true
-            break
-        fi
+    for a in "${allowed_commands[@]}"; do
+        [[ "$cmd" == "$a" ]] && valid=true && break
     done
-
     if ! $valid; then
-        echo "Comando \"$user_command\" no permitido."
+        echo "Comando \"$cmd\" no permitido."
         print_banner
         continue
     fi
 
-    if [[ "$command_name" == "help" ]]; then
+    # Ayuda
+    if [[ "$cmd" == "help" ]]; then
         print_help
         continue
     fi
 
+    # Comprobación de IPs en argumentos
     disallowed=false
-    # Verifica cada argumento en busca de direcciones IP.
-    for token in "${tokens[@]:1}"; do
-        ip_candidate="$token"
-        # Si el token tiene formato usuario@IP, extrae la IP.
-        if [[ "$token" == *"@"* ]]; then
-            ip_candidate="${token#*@}"
-        fi
-        # Si el token tiene formato IP:puerto, extrae la IP.
-        if [[ "$ip_candidate" == *":"* ]]; then
-            ip_candidate="${ip_candidate%%:*}"
-        fi
+    for arg in "${tokens[@]:1}"; do
+        ip_candidate="$arg"
+        [[ "$ip_candidate" == *"@"* ]] && ip_candidate=${ip_candidate#*@}
+        [[ "$ip_candidate" == *":"* ]] && ip_candidate=${ip_candidate%%:*}
         if [[ "$ip_candidate" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            # Comprueba si la IP pertenece a alguna red restringida.
-            for rnet in "${restricted_networks[@]}"; do
-                if ip_in_cidr "$ip_candidate" "$rnet"; then
-                    echo "Acceso a destino $ip_candidate no permitido."
+            # CIDR bloqueados
+            for net in "${restricted_networks[@]}"; do
+                ip_in_cidr "$ip_candidate" "$net" && {
+                    echo "Acceso a $ip_candidate no permitido."
                     disallowed=true
                     break 2
-                fi
+                }
             done
-            # Obtiene la ruta de salida para la IP.
+            # Ruta de salida
             route=$(get_route_for_ip "$ip_candidate")
-            route_allowed=false
-            for aroute in "${allowed_routes[@]}"; do
-                if [[ "$route" == "$aroute" ]]; then
-                    route_allowed=true
-                    break
-                fi
+            route_ok=false
+            for ar in "${allowed_routes[@]}"; do
+                [[ "$route" == "$ar" ]] && { route_ok=true; break; }
             done
-            if ! $route_allowed; then
+            if ! $route_ok; then
                 echo "No se permite salir por la ruta $route."
                 disallowed=true
                 break
             fi
         fi
     done
+    $disallowed && continue
 
-    if $disallowed; then
-        continue
-    fi
-
-    if [[ "$command_name" == "exit" ]]; then
+    # Salir del shell
+    if [[ "$cmd" == "exit" ]]; then
         exit 0
     fi
 
-    # Ejecuta el comando de forma segura.
+    # Ejecutar comando real
     "${tokens[@]}"
 done
