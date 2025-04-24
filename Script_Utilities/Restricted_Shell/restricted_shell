@@ -74,6 +74,9 @@ HISTSIZE=1000
 HISTCONTROL=ignoredups:ignorespace
 shopt -s histappend
 
+# Cargar el historial al inicio de la sesión
+history -r "$HISTFILE"
+
 print_banner
 
 # ---------------------- Bucle Principal ----------------------------------
@@ -151,6 +154,8 @@ while true; do
 
     # Salir del shell
     if [[ "$cmd" == "exit" ]]; then
+        # Guardar el historial al salir
+        history -a "$HISTFILE"
         exit 0
     fi
 
