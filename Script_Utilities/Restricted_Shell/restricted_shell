@@ -68,6 +68,12 @@ allowed_routes=("vlan199" "192.168.99.1" "vlan2")
 # Abrimos descriptor 3 apuntando al terminal real
 exec 3</dev/tty
 
+# Habilitar el historial de comandos
+HISTFILE="$HOME/.restricted_shell_history"
+HISTSIZE=1000
+HISTCONTROL=ignoredups:ignorespace
+shopt -s histappend
+
 print_banner
 
 # ---------------------- Bucle Principal ----------------------------------
@@ -78,6 +84,11 @@ while true; do
         echo
         echo "Adiós."
         break
+    fi
+
+    # Guardar el comando en el historial
+    if [[ -n "$user_command" ]]; then
+        history -s "$user_command"  # Guardar en el historial
     fi
 
     # Si comando vacío, volvemos a leer
