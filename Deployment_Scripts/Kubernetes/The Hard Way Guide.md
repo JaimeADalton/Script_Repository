@@ -1,4 +1,4 @@
-¡Perfecto! Empezar con Kubernetes puede ser desafiante, pero con esta guía vamos paso a paso y aprenderás muchísimo en el proceso.
+Empezar con Kubernetes puede ser desafiante, pero con esta guía vamos paso a paso y aprenderás muchísimo en el proceso.
 
 🚀 **¿Qué vamos a hacer?**
 
