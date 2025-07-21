@@ -126,7 +126,7 @@ function escanear_puertos {
         return
     fi
     
-    local puertos=("22" "23" "25" "53" "80" "110" "143" "443" "993" "995")
+    local puertos=("22" "23" "25" "53" "80" "110" "143" "443" "993" "995" "3389")
     local puertos_abiertos=()
     
     # Preferir nc si está disponible
