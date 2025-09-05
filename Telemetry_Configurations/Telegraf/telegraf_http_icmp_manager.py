@@ -35,6 +35,7 @@ logger = logging.getLogger("telegraf_manager")
 # Helper functions
 # ---------------------------------------------------------------------------
 _IP_PATTERN = re.compile(r"^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$")
+_URL_RE = re.compile(r'"(https?://[^"]+)"')
 
 def is_valid_ip(ip: str) -> bool:
     """Valida si una cadena de texto es una dirección IPv4 válida."""
@@ -44,9 +45,30 @@ def is_valid_url(url: str) -> bool:
     """Valida si una cadena de texto es una URL válida."""
     try:
         result = urlparse(url)
-        return all([result.scheme, result.netloc])
-    except:
+        return bool(result.scheme and result.netloc)
+    except Exception:
         return False
+
+def normalize_url(u: str) -> str:
+    """Devuelve la URL con esquema. Por defecto https:// si falta."""
+    u = u.strip()
+    if not u:
+        return u
+    parsed = urlparse(u)
+    if not parsed.scheme:
+        u = "https://" + u
+    return u
+
+def read_existing_http_urls(path: Path) -> list[str]:
+    """Extrae las URLs ya configuradas en un http_monitoring.conf."""
+    if not path.exists():
+        return []
+    try:
+        content = path.read_text(encoding="utf-8")
+        return _URL_RE.findall(content)
+    except Exception as exc:
+        logger.error("No se pudieron leer URLs existentes de %s: %s", path, exc)
+        return []
 
 def resolve_domain_to_ip(url: str) -> str | None:
     """Resuelve un dominio de una URL a su dirección IP."""
@@ -231,7 +253,7 @@ class TelegrafManager:
             logger.error("Fallo al escribir %s: %s", path, exc)
 
     def add_target(self):
-        """Añade objetivos HTTP/ICMP basados en URLs."""
+        """Añade objetivos HTTP/ICMP basados en URLs. Mezcla con existentes y normaliza esquema."""
         sites = self.list_sites()
         site: str | None = None
 
@@ -274,14 +296,15 @@ class TelegrafManager:
 
         # Pedir URLs
         print("\nIntroduce las URLs a monitorear (una por línea, línea vacía para terminar):")
-        print("Ejemplo: https://example.com")
+        print("Ejemplo: example.com  o  https://example.com")
         urls = []
         while True:
-            url = input("URL: ").strip()
-            if not url:
+            raw = input("URL: ").strip()
+            if not raw:
                 break
+            url = normalize_url(raw)
             if not is_valid_url(url):
-                logger.error("URL inválida: %s", url)
+                logger.error("URL inválida: %s", raw)
                 continue
             urls.append(url)
 
@@ -298,16 +321,21 @@ class TelegrafManager:
 
         site_dir = Path(self.tgf_dir, site)
 
-        # Generar configuración HTTP
+        # Generar/actualizar configuración HTTP con mezcla y deduplicado
         http_config_path = site_dir / "http_monitoring.conf"
-        if http_config_path.exists() and not prompt_yes_no(f"El archivo HTTP {http_config_path.name} ya existe. ¿Sobrescribir?"):
-            logger.info("Saltando configuración HTTP.")
-        else:
-            self._write_file(http_config_path, self._http_cfg(urls, site))
+        existing = set(read_existing_http_urls(http_config_path))
+        incoming = set(urls)
+        merged = sorted(existing | incoming)
 
-        # Generar configuraciones ICMP
+        self._write_file(http_config_path, self._http_cfg(merged, site))
+        logger.info(
+            "HTTP actualizado. Existentes=%d, Nuevas=%d, Total=%d",
+            len(existing), len(incoming - existing), len(merged)
+        )
+
+        # Generar configuraciones ICMP solo para URLs realmente nuevas
         icmp_configs_created = []
-        for url in urls:
+        for url in sorted(incoming - existing):
             ip = resolve_domain_to_ip(url)
             if not ip:
                 logger.warning(f"No se pudo resolver la IP para {url}, saltando configuración ICMP.")
@@ -326,7 +354,7 @@ class TelegrafManager:
             self._write_file(icmp_config_path, self._icmp_cfg(ip, url, site))
             icmp_configs_created.append(icmp_config_name)
 
-        logger.info(f"Configuración completada:")
+        logger.info("Configuración completada:")
         logger.info(f"  - HTTP: {http_config_path.name}")
         logger.info(f"  - ICMP: {len(icmp_configs_created)} archivos creados")
 
@@ -340,7 +368,7 @@ class TelegrafManager:
         print("\n=== MEASUREMENTS/SITIOS CONFIGURADOS ===")
         for site in sites:
             site_dir = Path(self.tgf_dir, site)
-            http_files = list(site_dir.glob("http_*.conf"))
+            http_files = list(site_dir.glob("http_monitoring.conf"))
             icmp_files = list(site_dir.glob("icmp_*.conf"))
 
             print(f"\n📊 Measurement: {site}")
@@ -381,7 +409,7 @@ class TelegrafManager:
         site_dir = Path(self.tgf_dir, site)
 
         # Mostrar archivos disponibles
-        http_files = list(site_dir.glob("http_*.conf"))
+        http_files = list(site_dir.glob("http_monitoring.conf"))
         icmp_files = list(site_dir.glob("icmp_*.conf"))
 
         if not http_files and not icmp_files:
@@ -442,8 +470,6 @@ class TelegrafManager:
 
         self._reload_telegraf()
 
-        self._reload_telegraf()
-
     def _reload_telegraf(self) -> None:
         """Recarga el contenedor de Telegraf."""
         logger.info("Recargando el contenedor de Telegraf...")
@@ -495,7 +521,7 @@ def main():
             except Exception as e:
                 logger.error("Ocurrió un error inesperado durante la operación: %s", e)
         elif choice == "4":
-            logger.info("¡Adiós!")
+            logger.info("Adiós.")
             break
         else:
             print("Opción inválida. Inténtalo de nuevo.")
