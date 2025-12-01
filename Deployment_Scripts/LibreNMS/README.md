@@ -10,7 +10,7 @@ Sistema completo de monitorización de red para ISP basado en **LibreNMS**, **Ox
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │   ┌─────────┐    ┌─────────────┐    ┌──────────────┐                    │
-│   │  Nginx  │───▶│  LibreNMS   │───▶│   MariaDB    │                  │
+│   │  Nginx  │──▶│  LibreNMS   │──▶│   MariaDB    │                    │
 │   │  :443   │    │   (Web)     │    │              │                    │
 │   └─────────┘    └──────┬──────┘    └──────────────┘                    │
 │                         │                                               │
