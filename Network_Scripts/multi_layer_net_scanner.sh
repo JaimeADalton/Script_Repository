@@ -286,13 +286,31 @@ function menu_seleccion_red {
             echo -e "\n${GREEN}Generando lista de IPs para TODAS las redes...${END}"
             IP_LIST=()
             for red in "${REDES_DISPONIBLES[@]}"; do
-                local temp_list=()
-                generar_ips_desde_cidr "$red"
-                # Nota: IP_LIST se va acumulando
+                local base=$(echo "$red" | cut -d'/' -f1)
+                local mascara=$(echo "$red" | cut -d'/' -f2)
+                IFS='.' read -r o1 o2 o3 o4 <<< "$base"
+                
+                # Solo soportamos /24 para múltiples redes (simplicidad)
+                if [[ "$mascara" == "24" ]]; then
+                    for i in $(seq 1 254); do
+                        IP_LIST+=("${o1}.${o2}.${o3}.${i}")
+                    done
+                    echo -e "  ${GREEN}✓${END} $red añadida (254 IPs)"
+                else
+                    echo -e "  ${YELLOW}⚠${END} $red omitida (solo /24 soportado en modo 'todas')"
+                fi
             done
+            
+            if [[ ${#IP_LIST[@]} -eq 0 ]]; then
+                echo -e "${RED}No se pudieron cargar IPs${END}"
+                sleep 2
+                return 1
+            fi
             
             # Eliminar duplicados y ordenar
             mapfile -t IP_LIST < <(printf '%s\n' "${IP_LIST[@]}" | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | uniq)
+            echo -e "\n${GREEN}Total: ${#IP_LIST[@]} IPs cargadas${END}"
+            sleep 1
             return 0
             ;;
         M)
@@ -1222,22 +1240,54 @@ function mostrar_hosts {
     # Archivo de resultados
     local archivo_resultado="hosts_${tipo}_$(date +%Y%m%d_%H%M%S).txt"
     
-    for ((i=0; i<total; i++)); do
-        local ip="${IP_LIST[$i]}"
-        local resultado=$(ping_ip "$ip")
+    # Limpiar caché para escaneo fresco
+    PING_CACHE=()
+    rm -f "$TEMP_DIR/host_"*
+    
+    echo -e "${YELLOW}Escaneando ${total} hosts...${END}"
+    echo ""
+    
+    # Usar procesamiento paralelo por lotes
+    local batch_size=30
+    
+    for ((i=0; i<total; i+=batch_size)); do
+        local fin=$((i + batch_size))
+        [[ $fin -gt $total ]] && fin=$total
         
-        mostrar_progreso $((i+1)) $total
+        # Lanzar pings en paralelo
+        for ((j=i; j<fin; j++)); do
+            local ip="${IP_LIST[$j]}"
+            (
+                ping -c 1 -W 1 -s 8 -q "$ip" > /dev/null 2>&1
+                echo "$?" > "$TEMP_DIR/host_$j"
+            ) &
+        done
         
-        if [[ "$tipo" == "up" && $resultado -eq 0 ]]; then
-            echo -e "\n${color}$simbolo $ip${END}"
-            resultados+=("$ip")
-            ((encontrados++))
-        elif [[ "$tipo" == "down" && $resultado -ne 0 ]]; then
-            echo -e "\n${color}$simbolo $ip${END}"
-            resultados+=("$ip")
-            ((encontrados++))
-        fi
+        wait
+        
+        # Procesar resultados del lote
+        for ((j=i; j<fin; j++)); do
+            local ip="${IP_LIST[$j]}"
+            if [[ -f "$TEMP_DIR/host_$j" ]]; then
+                local resultado=$(cat "$TEMP_DIR/host_$j")
+                
+                if [[ "$tipo" == "up" && "$resultado" == "0" ]]; then
+                    echo -e "${color}$simbolo $ip${END}"
+                    resultados+=("$ip")
+                    ((encontrados++))
+                elif [[ "$tipo" == "down" && "$resultado" != "0" ]]; then
+                    echo -e "${color}$simbolo $ip${END}"
+                    resultados+=("$ip")
+                    ((encontrados++))
+                fi
+            fi
+        done
+        
+        mostrar_progreso $fin $total
     done
+    
+    # Limpiar temporales
+    rm -f "$TEMP_DIR/host_"*
     
     # Guardar resultados
     {
