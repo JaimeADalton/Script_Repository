@@ -109,8 +109,6 @@ REDIS_HOST=redis
 LIBRENMS_SNMP_COMMUNITY=public
 LIBRENMS_WEATHERMAP=false
 LOG_LEVEL=info
-APP_URL=https://${SERVER_IP}
-SESSION_SECURE_COOKIE=true
 EOF
 log_success "librenms.env creado"
 
@@ -543,11 +541,30 @@ else
     log_warning "Usuario admin ya existe"
 fi
 
-# Configurar base_url
+# Configurar APP_URL y SESSION_SECURE_COOKIE en Laravel .env
+log_info "Configurando APP_URL y SESSION_SECURE_COOKIE..."
+docker compose exec -T librenms bash -c "cat >> /data/.env << EOF
+APP_URL=https://${SERVER_IP}
+SESSION_SECURE_COOKIE=true
+EOF"
+log_success "Variables Laravel configuradas"
+
+# Configurar base_url en LibreNMS
 log_info "Configurando base_url..."
 docker compose exec -T librenms lnms config:set base_url "https://${SERVER_IP}" 2>/dev/null || true
 docker compose exec -T librenms lnms config:cache 2>/dev/null || true
 log_success "base_url configurado"
+
+# Silenciar warning de Scheduler (falso positivo en Docker)
+log_info "Configurando cron.d..."
+docker compose exec -T librenms mkdir -p /etc/cron.d 2>/dev/null || true
+docker compose exec -T librenms touch /etc/cron.d/librenms 2>/dev/null || true
+log_success "Scheduler warning silenciado"
+
+# Reiniciar para aplicar cambios
+log_info "Reiniciando LibreNMS..."
+docker compose restart librenms
+sleep 10
 
 # =============================================================================
 log_step "FASE 7: Verificacion Final"
