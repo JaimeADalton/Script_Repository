@@ -169,6 +169,8 @@ services:
       - DB_TIMEOUT=60
       - DISPATCHER_NODE_ID=${DISPATCHER_NODE_ID:-dispatcher-node-01}
       - SIDECAR_DISPATCHER=1
+      - LIBRENMS_SERVICE_SCHEDULER=1
+      - LIBRENMS_SERVICE_MAINTENANCE=1
     networks:
       - noc-internal
     logging:

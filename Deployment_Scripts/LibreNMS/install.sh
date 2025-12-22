@@ -33,7 +33,6 @@ set -e
 # CONFIGURACIÓN
 # =============================================================================
 VERSION="3.2.0"
-ADMIN_PASSWORD="${NOC_ADMIN_PASSWORD:-Admin123!}"
 TIMEZONE="${NOC_TIMEZONE:-Europe/Madrid}"
 CLEAN_INSTALL=false
 
@@ -116,21 +115,6 @@ if ! command -v openssl &> /dev/null; then
     log_error "OpenSSL no está instalado. Instálalo con: apt install openssl"
 fi
 log_success "OpenSSL disponible"
-
-# Verificar puertos
-check_port() {
-    if ss -tuln 2>/dev/null | grep -q ":$1 " || netstat -tuln 2>/dev/null | grep -q ":$1 "; then
-        log_warning "Puerto $1 ya está en uso. Puede haber conflictos."
-        return 1
-    fi
-    return 0
-}
-
-check_port 80 || true
-check_port 443 || true
-check_port 514 || true
-check_port 162 || true
-check_port 8888 || true
 
 # Memoria
 TOTAL_MEM=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
@@ -232,7 +216,13 @@ log_success "Permisos establecidos"
 log_step "FASE 3: Generación de Credenciales"
 # =============================================================================
 
-# SIEMPRE generar nueva contraseña si no existe o es placeholder
+if [ -z "$NOC_ADMIN_PASSWORD" ]; then
+  read -s -p "Introduce la contraseña de administrador: " ADMIN_PASSWORD
+  echo
+else
+  ADMIN_PASSWORD="$NOC_ADMIN_PASSWORD"
+fi
+
 DB_PASSWORD="${NOC_DB_PASSWORD:-}"
 
 if [[ -z "$DB_PASSWORD" ]]; then
