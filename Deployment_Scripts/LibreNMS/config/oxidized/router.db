@@ -1,0 +1,8 @@
+# =============================================================================
+# Oxidized Router Database
+# =============================================================================
+# Formato: hostname:model:group
+# Este archivo contiene un nodo dummy para permitir el arranque de Oxidized.
+# Eliminar después de configurar la integración con LibreNMS API.
+# =============================================================================
+dummy.local:linux:placeholder

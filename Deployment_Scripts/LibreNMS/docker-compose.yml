@@ -1,0 +1,316 @@
+# =============================================================================
+# NOC-ISP Stack - Docker Compose Production Configuration
+# =============================================================================
+# Version: 3.1.0 - Producción
+# Autor: Automatizado
+# Fecha: 2024-12
+#
+# Stack completo de monitorización de red:
+#   - LibreNMS (Network Monitoring System)
+#   - MariaDB (Database)
+#   - Redis (Cache/Sessions/Queues)
+#   - Dispatcher (Poller distribuido)
+#   - Syslog-ng (Receptor de logs)
+#   - SNMP Trapd (Receptor de traps)
+#   - Oxidized (Backup de configuraciones)
+#   - Nginx (Reverse proxy HTTPS)
+#
+# Uso:
+#   ./install.sh
+#
+# =============================================================================
+
+name: noc-isp
+
+services:
+  # ===========================================================================
+  # DATABASE - MariaDB
+  # ===========================================================================
+  db:
+    image: mariadb:10.11
+    container_name: librenms_db
+    hostname: db
+    restart: unless-stopped
+    command:
+      - "mysqld"
+      - "--innodb-file-per-table=1"
+      - "--lower-case-table-names=0"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--innodb-buffer-pool-size=512M"
+      - "--innodb-flush-log-at-trx-commit=2"
+      - "--innodb-log-file-size=128M"
+      - "--max-connections=300"
+      - "--skip-name-resolve"
+    volumes:
+      - "./data/db:/var/lib/mysql"
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+      - MARIADB_RANDOM_ROOT_PASSWORD=yes
+      - MYSQL_DATABASE=${DB_DATABASE:-librenms}
+      - MYSQL_USER=${DB_USER:-librenms}
+      - MYSQL_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - noc-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # CACHE - Redis
+  # ===========================================================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: librenms_redis
+    hostname: redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --save 300 100
+    volumes:
+      - "./data/redis:/data"
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - noc-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # APPLICATION - LibreNMS (Web + Core)
+  # ===========================================================================
+  librenms:
+    image: librenms/librenms:24.11.0
+    container_name: librenms
+    hostname: librenms
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - DB_HOST=db
+      - DB_NAME=${DB_DATABASE:-librenms}
+      - DB_USER=${DB_USER:-librenms}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_TIMEOUT=60
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8000/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    networks:
+      - noc-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ===========================================================================
+  # POLLER - Dispatcher (Sidecar)
+  # ===========================================================================
+  dispatcher:
+    image: librenms/librenms:24.11.0
+    container_name: librenms_dispatcher
+    hostname: librenms-dispatcher
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_healthy
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - DB_HOST=db
+      - DB_NAME=${DB_DATABASE:-librenms}
+      - DB_USER=${DB_USER:-librenms}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_TIMEOUT=60
+      - DISPATCHER_NODE_ID=${DISPATCHER_NODE_ID:-dispatcher-node-01}
+      - SIDECAR_DISPATCHER=1
+    networks:
+      - noc-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ===========================================================================
+  # SYSLOG - Syslog-ng (Sidecar)
+  # ===========================================================================
+  syslogng:
+    image: librenms/librenms:24.11.0
+    container_name: librenms_syslogng
+    hostname: librenms-syslogng
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_healthy
+    ports:
+      - "${SYSLOG_PORT:-514}:514/tcp"
+      - "${SYSLOG_PORT:-514}:514/udp"
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - DB_HOST=db
+      - DB_NAME=${DB_DATABASE:-librenms}
+      - DB_USER=${DB_USER:-librenms}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_TIMEOUT=60
+      - SIDECAR_SYSLOGNG=1
+    networks:
+      - noc-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ===========================================================================
+  # SNMP TRAPS - SNMPTrapd (Sidecar)
+  # ===========================================================================
+  snmptrapd:
+    image: librenms/librenms:24.11.0
+    container_name: librenms_snmptrapd
+    hostname: librenms-snmptrapd
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      librenms:
+        condition: service_healthy
+    ports:
+      - "${SNMPTRAP_PORT:-162}:162/tcp"
+      - "${SNMPTRAP_PORT:-162}:162/udp"
+    volumes:
+      - "./data/librenms:/data"
+    env_file:
+      - "./librenms.env"
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - DB_HOST=db
+      - DB_NAME=${DB_DATABASE:-librenms}
+      - DB_USER=${DB_USER:-librenms}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_TIMEOUT=60
+      - SIDECAR_SNMPTRAPD=1
+    networks:
+      - noc-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ===========================================================================
+  # CONFIG BACKUP - Oxidized
+  # ===========================================================================
+  oxidized:
+    image: oxidized/oxidized:0.30.1
+    container_name: librenms_oxidized
+    hostname: oxidized
+    restart: unless-stopped
+    depends_on:
+      librenms:
+        condition: service_healthy
+    volumes:
+      - "./data/oxidized:/home/oxidized/.config/oxidized"
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+    ports:
+      - "${OXIDIZED_PORT:-8888}:8888"
+    networks:
+      - noc-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ===========================================================================
+  # REVERSE PROXY - Nginx
+  # ===========================================================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: librenms_proxy
+    hostname: proxy
+    restart: unless-stopped
+    depends_on:
+      librenms:
+        condition: service_healthy
+    volumes:
+      - "./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
+      - "./config/nginx/ssl:/etc/nginx/ssl:ro"
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    networks:
+      - noc-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  noc-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
