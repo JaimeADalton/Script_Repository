@@ -117,6 +117,21 @@ if ! command -v openssl &> /dev/null; then
 fi
 log_success "OpenSSL disponible"
 
+# Verificar puertos
+check_port() {
+    if ss -tuln 2>/dev/null | grep -q ":$1 " || netstat -tuln 2>/dev/null | grep -q ":$1 "; then
+        log_warning "Puerto $1 ya está en uso. Puede haber conflictos."
+        return 1
+    fi
+    return 0
+}
+
+check_port 80 || true
+check_port 443 || true
+check_port 514 || true
+check_port 162 || true
+check_port 8888 || true
+
 # Memoria
 TOTAL_MEM=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
 if [[ $TOTAL_MEM -lt 3500 && $TOTAL_MEM -gt 0 ]]; then
