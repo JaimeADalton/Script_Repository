@@ -1,44 +1,22 @@
 ---
-# =============================================================================
-# Oxidized Configuration
-# =============================================================================
-# Configuración inicial con nodo dummy para permitir el arranque.
-# Después de la instalación, se recomienda integrar con la API de LibreNMS
-# ejecutando: ./configure-oxidized-api.sh <TOKEN>
-# =============================================================================
-
 username: admin
 password: admin
 enable: ~
-
 interval: 3600
 timeout: 20
 retries: 3
-
 debug: false
 use_syslog: false
 run_once: false
 threads: 30
-use_max_threads: false
 next_adds_job: false
-
 prompt: !ruby/regexp /^([\w.@-]+[#>]\s?)$/
-
 rest: 0.0.0.0:8888
-
-vars:
-  enable: ~
-
-groups: {}
-models: {}
-
 pid: /home/oxidized/.config/oxidized/pid
 log: /home/oxidized/.config/oxidized/oxidized.log
-
 crash:
   directory: /home/oxidized/.config/oxidized/crashes
   hostnames: false
-
 input:
   default: ssh, telnet
   debug: false
@@ -47,12 +25,10 @@ input:
   ftp:
     passive: true
   utf8_encoded: true
-
 output:
   default: file
   file:
     directory: /home/oxidized/.config/oxidized/configs
-
 source:
   default: csv
   csv:
@@ -62,39 +38,12 @@ source:
       name: 0
       model: 1
       group: 2
-    gpg: false
-
 model_map:
   cisco: ios
-  ciscowlc: aireos
-  iosxe: iosxe
-  iosxr: iosxr
-  nxos: nxos
-  asa: asa
   juniper: junos
-  junos: junos
-  arista_eos: eos
-  arista: eos
-  linux: linux
-  procurve: procurve
-  aruba-os: arubaos
   routeros: routeros
   mikrotik: routeros
-  vyos: vyos
-  panos: panos
   fortinet: fortios
-  fortigate: fortios
   huawei: vrp
-  dell: powerconnect
-  dlink: dlink
-  edgeos: edgeos
-  opnsense: opnsense
-  pfsense: pfsense
-  tplink: tplink
-  ubiquiti: airos
-  unifi: unifi
-  opengear: opengear
-  nokia: sros
-  comware: comware
-  hp: procurve
-  hpe: procurve
+  arista: eos
+  linux: linux

@@ -1,23 +1,21 @@
 # =============================================================================
 # NOC-ISP Stack - Docker Compose Production Configuration
 # =============================================================================
-# Version: 3.1.0 - Producción
-# Autor: Automatizado
-# Fecha: 2024-12
+# Version: 4.0.0 - Producción Final
+# 
+# IMPORTANTE: Este compose usa network_mode: host para syslog y snmptrapd
+# para evitar el problema de Source NAT de Docker que enmascara las IPs
+# de los dispositivos que envían logs.
 #
 # Stack completo de monitorización de red:
 #   - LibreNMS (Network Monitoring System)
 #   - MariaDB (Database)
 #   - Redis (Cache/Sessions/Queues)
 #   - Dispatcher (Poller distribuido)
-#   - Syslog-ng (Receptor de logs)
-#   - SNMP Trapd (Receptor de traps)
+#   - Syslog-ng (Receptor de logs) - network_mode: host
+#   - SNMP Trapd (Receptor de traps) - network_mode: host
 #   - Oxidized (Backup de configuraciones)
 #   - Nginx (Reverse proxy HTTPS)
-#
-# Uso:
-#   ./install.sh
-#
 # =============================================================================
 
 name: noc-isp
@@ -169,8 +167,6 @@ services:
       - DB_TIMEOUT=60
       - DISPATCHER_NODE_ID=${DISPATCHER_NODE_ID:-dispatcher-node-01}
       - SIDECAR_DISPATCHER=1
-      - LIBRENMS_SERVICE_SCHEDULER=1
-      - LIBRENMS_SERVICE_MAINTENANCE=1
     networks:
       - noc-internal
     logging:
@@ -180,22 +176,24 @@ services:
         max-file: "5"
 
   # ===========================================================================
-  # SYSLOG - Syslog-ng (Sidecar)
+  # SYSLOG - Syslog-ng (network_mode: host para preservar IP origen)
+  # ===========================================================================
+  # IMPORTANTE: Usamos network_mode: host para que syslog-ng vea las IPs
+  # reales de los dispositivos que envían logs, evitando el Source NAT
+  # de Docker que enmascara todas las IPs como 172.x.x.x
   # ===========================================================================
   syslogng:
     image: librenms/librenms:24.11.0
     container_name: librenms_syslogng
     hostname: librenms-syslogng
     restart: unless-stopped
+    network_mode: host
     cap_add:
       - NET_ADMIN
       - NET_RAW
     depends_on:
       librenms:
         condition: service_healthy
-    ports:
-      - "${SYSLOG_PORT:-514}:514/tcp"
-      - "${SYSLOG_PORT:-514}:514/udp"
     volumes:
       - "./data/librenms:/data"
     env_file:
@@ -204,14 +202,16 @@ services:
       - TZ=${TZ:-Europe/Madrid}
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - DB_HOST=db
+      - DB_HOST=127.0.0.1
       - DB_NAME=${DB_DATABASE:-librenms}
       - DB_USER=${DB_USER:-librenms}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_TIMEOUT=60
+      - REDIS_HOST=127.0.0.1
       - SIDECAR_SYSLOGNG=1
-    networks:
-      - noc-internal
+    extra_hosts:
+      - "db:127.0.0.1"
+      - "redis:127.0.0.1"
     logging:
       driver: json-file
       options:
@@ -219,22 +219,23 @@ services:
         max-file: "3"
 
   # ===========================================================================
-  # SNMP TRAPS - SNMPTrapd (Sidecar)
+  # SNMP TRAPS - SNMPTrapd (network_mode: host para preservar IP origen)
+  # ===========================================================================
+  # IMPORTANTE: Usamos network_mode: host para que snmptrapd vea las IPs
+  # reales de los dispositivos que envían traps SNMP
   # ===========================================================================
   snmptrapd:
     image: librenms/librenms:24.11.0
     container_name: librenms_snmptrapd
     hostname: librenms-snmptrapd
     restart: unless-stopped
+    network_mode: host
     cap_add:
       - NET_ADMIN
       - NET_RAW
     depends_on:
       librenms:
         condition: service_healthy
-    ports:
-      - "${SNMPTRAP_PORT:-162}:162/tcp"
-      - "${SNMPTRAP_PORT:-162}:162/udp"
     volumes:
       - "./data/librenms:/data"
     env_file:
@@ -243,14 +244,16 @@ services:
       - TZ=${TZ:-Europe/Madrid}
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - DB_HOST=db
+      - DB_HOST=127.0.0.1
       - DB_NAME=${DB_DATABASE:-librenms}
       - DB_USER=${DB_USER:-librenms}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_TIMEOUT=60
+      - REDIS_HOST=127.0.0.1
       - SIDECAR_SNMPTRAPD=1
-    networks:
-      - noc-internal
+    extra_hosts:
+      - "db:127.0.0.1"
+      - "redis:127.0.0.1"
     logging:
       driver: json-file
       options:
