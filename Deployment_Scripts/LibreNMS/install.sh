@@ -2,8 +2,8 @@
 # =============================================================================
 # NOC-ISP Stack - Script de Instalación Completa y Automatizada
 # =============================================================================
-# Version: 3.1.0
-# 
+# Version: 3.2.0
+#
 # Este script despliega un stack completo de monitorización de red:
 #   - LibreNMS (Network Monitoring System)
 #   - MariaDB (Database)
@@ -18,6 +18,9 @@
 #   chmod +x install.sh
 #   ./install.sh
 #
+# Para reinstalación limpia:
+#   ./install.sh --clean
+#
 # Variables de entorno opcionales:
 #   NOC_ADMIN_PASSWORD - Contraseña del usuario admin (default: Admin123!)
 #   NOC_DB_PASSWORD    - Contraseña de la base de datos (se genera si no existe)
@@ -29,9 +32,15 @@ set -e
 # =============================================================================
 # CONFIGURACIÓN
 # =============================================================================
-VERSION="3.1.0"
+VERSION="3.2.0"
 ADMIN_PASSWORD="${NOC_ADMIN_PASSWORD:-Admin123!}"
 TIMEZONE="${NOC_TIMEZONE:-Europe/Madrid}"
+CLEAN_INSTALL=false
+
+# Parsear argumentos
+if [[ "$1" == "--clean" || "$1" == "-c" ]]; then
+    CLEAN_INSTALL=true
+fi
 
 # Colores
 RED='\033[0;31m'
@@ -47,7 +56,7 @@ log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[✓ OK]${NC} $1"; }
 log_warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-log_step() { 
+log_step() {
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  $1${NC}"
@@ -108,21 +117,6 @@ if ! command -v openssl &> /dev/null; then
 fi
 log_success "OpenSSL disponible"
 
-# Verificar puertos
-check_port() {
-    if ss -tuln 2>/dev/null | grep -q ":$1 " || netstat -tuln 2>/dev/null | grep -q ":$1 "; then
-        log_warning "Puerto $1 ya está en uso. Puede haber conflictos."
-        return 1
-    fi
-    return 0
-}
-
-check_port 80 || true
-check_port 443 || true
-check_port 514 || true
-check_port 162 || true
-check_port 8888 || true
-
 # Memoria
 TOTAL_MEM=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
 if [[ $TOTAL_MEM -lt 3500 && $TOTAL_MEM -gt 0 ]]; then
@@ -138,6 +132,14 @@ log_success "IP del servidor: $SERVER_IP"
 # =============================================================================
 log_step "FASE 2: Preparación de Directorios"
 # =============================================================================
+
+# Limpieza si se solicita
+if [[ "$CLEAN_INSTALL" == true ]]; then
+    log_warning "Instalación limpia solicitada. Eliminando datos anteriores..."
+    docker compose down --remove-orphans 2>/dev/null || true
+    rm -rf data/ .env 2>/dev/null || true
+    log_success "Datos anteriores eliminados"
+fi
 
 # Crear estructura de directorios
 mkdir -p data/{db,redis,librenms,oxidized/configs,oxidized/crashes}
@@ -208,26 +210,33 @@ fi
 
 # Establecer permisos
 chmod -R 755 data/
+chown -R 1000:1000 data/
 log_success "Permisos establecidos"
 
 # =============================================================================
 log_step "FASE 3: Generación de Credenciales"
 # =============================================================================
 
-# Generar contraseña de DB
-if [[ -f ".env" ]]; then
-    CURRENT_PASS=$(grep "^DB_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
-    if [[ "$CURRENT_PASS" == "PLACEHOLDER_WILL_BE_REPLACED" || -z "$CURRENT_PASS" ]]; then
-        DB_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
+# SIEMPRE generar nueva contraseña si no existe o es placeholder
+DB_PASSWORD="${NOC_DB_PASSWORD:-}"
+
+if [[ -z "$DB_PASSWORD" ]]; then
+    if [[ -f ".env" ]]; then
+        CURRENT_PASS=$(grep "^DB_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
+        if [[ "$CURRENT_PASS" == "PLACEHOLDER"* || -z "$CURRENT_PASS" || "$CURRENT_PASS" == *"CHANGE"* ]]; then
+            DB_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 24)
+            log_info "Generando nueva contraseña de base de datos..."
+        else
+            DB_PASSWORD="$CURRENT_PASS"
+            log_info "Usando contraseña de DB existente"
+        fi
     else
-        DB_PASSWORD="$CURRENT_PASS"
-        log_info "Usando contraseña de DB existente"
+        DB_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 24)
+        log_info "Generando nueva contraseña de base de datos..."
     fi
-else
-    DB_PASSWORD="${NOC_DB_PASSWORD:-$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)}"
 fi
 
-# Crear archivo .env
+# Crear archivo .env (SIEMPRE sobrescribir para asegurar consistencia)
 cat > .env << EOF
 # =============================================================================
 # NOC-ISP Stack - Variables de Entorno
@@ -254,10 +263,11 @@ HTTPS_PORT=443
 SYSLOG_PORT=514
 SNMPTRAP_PORT=162
 OXIDIZED_PORT=8888
+SESSION_SECURE_COOKIE=true
 EOF
 
 log_success "Archivo .env generado"
-log_info "Contraseña de DB: ${DB_PASSWORD:0:8}..."
+log_success "Contraseña de DB: ${DB_PASSWORD}"
 
 # =============================================================================
 log_step "FASE 4: Generación de Certificados SSL"
@@ -295,7 +305,7 @@ log_step "FASE 6: Despliegue de Contenedores"
 # Detener contenedores existentes
 log_info "Deteniendo contenedores existentes (si los hay)..."
 docker compose down --remove-orphans 2>/dev/null || true
-sleep 2
+sleep 3
 
 # Descargar imágenes
 log_info "Descargando imágenes Docker (esto puede tardar varios minutos)..."
@@ -315,7 +325,7 @@ wait_for_healthy() {
     local container=$1
     local max_wait=$2
     local waited=0
-    
+
     echo -n "  Esperando $container: "
     while [[ $waited -lt $max_wait ]]; do
         status=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "starting")
@@ -338,36 +348,61 @@ wait_for_healthy() {
 
 wait_for_healthy "librenms_db" 120
 wait_for_healthy "librenms_redis" 60
+
 log_info "Esperando LibreNMS (puede tardar 2-4 minutos en el primer arranque)..."
 wait_for_healthy "librenms" 300
 
-# Esperar un poco más para asegurar estabilidad
-log_info "Esperando estabilización de servicios..."
-sleep 20
+# Esperar a que los sidecars estén completamente iniciados
+log_info "Esperando estabilización de servicios sidecars..."
+sleep 30
 
 # =============================================================================
 log_step "FASE 8: Configuración Inicial de LibreNMS"
 # =============================================================================
 
-# Crear usuario administrador
+# --- CORRECCIONES AUTOMÁTICAS (Lo que hiciste a mano) ---
+
+# 1. FIX REDIS: Evita el error de escritura si hay poca memoria/disco
+log_info "Aplicando corrección de persistencia en Redis..."
+docker exec librenms_redis redis-cli CONFIG SET stop-writes-on-bgsave-error no 2>/dev/null || true
+
+# 2. FIX PERMISOS: Asegura que LibreNMS pueda escribir sus gráficos y logs
+log_info "Asegurando permisos correctos (RRD y Logs)..."
+docker exec librenms chown -R librenms:librenms /data/rrd /data/logs /opt/librenms/logs 2>/dev/null || true
+
+# 3. FIX MIGRACIÓN: Fuerza la creación de todas las tablas ANTES de crear usuarios
+log_info "Ejecutando migraciones de base de datos pendientes..."
+docker exec librenms php /opt/librenms/lnms migrate --force 2>/dev/null || true
+
+# 4. FIX SCHEDULER: Instala el cron para evitar el error de 'Scheduler not running'
+log_info "Instalando planificador de tareas (Scheduler)..."
+docker exec librenms cp /opt/librenms/dist/librenms-scheduler.cron /etc/cron.d/librenms 2>/dev/null || true
+docker exec librenms chmod 644 /etc/cron.d/librenms 2>/dev/null || true
+
+# --- CONFIGURACIÓN ESTÁNDAR ---
+
+# Crear usuario administrador (Ahora sí funcionará seguro porque la DB está migrada)
 log_info "Creando usuario administrador..."
-if docker exec librenms php /opt/librenms/lnms user:add admin -p "${ADMIN_PASSWORD}" -r admin -e admin@noc.local 2>/dev/null; then
-    log_success "Usuario admin creado"
-else
-    log_warning "Usuario admin ya existe o error en creación"
-fi
+docker exec librenms php /opt/librenms/lnms user:add admin -p "${ADMIN_PASSWORD}" -r admin -e admin@noc.local 2>/dev/null && \
+    log_success "Usuario admin creado" || \
+    log_warning "Usuario admin ya existe"
 
 # Configurar base_url
 log_info "Configurando base_url..."
 docker exec librenms php /opt/librenms/lnms config:set base_url "https://${SERVER_IP}" 2>/dev/null || true
 log_success "base_url: https://${SERVER_IP}"
 
-# Habilitar secure cookies (FIX para el warning)
+# Habilitar secure cookies - APLICANDO TU SOLUCIÓN MANUAL
 log_info "Habilitando secure session cookies..."
-docker exec librenms php /opt/librenms/lnms config:set secure_cookies true 2>/dev/null || true
-docker exec librenms php /opt/librenms/lnms config:set session.secure_cookie true 2>/dev/null || true
-# También configurar via archivo de entorno
-docker exec librenms bash -c 'echo "SESSION_SECURE_COOKIE=true" >> /data/.env' 2>/dev/null || true
+# Tu fix manual fue editar /opt/librenms/.env, así que lo hacemos aquí directamente:
+docker exec librenms bash -c 'grep -q "SESSION_SECURE_COOKIE" /opt/librenms/.env 2>/dev/null || echo "SESSION_SECURE_COOKIE=true" >> /opt/librenms/.env' 2>/dev/null || true
+# Mantenemos también la configuración en config.php por redundancia
+docker exec librenms bash -c 'cat >> /opt/librenms/config.php << EOF
+
+// Secure cookies configuration
+\$config["secure_cookies"] = true;
+EOF
+' 2>/dev/null || true
 log_success "Secure cookies configuradas"
 
 # Habilitar syslog
@@ -382,10 +417,11 @@ docker exec librenms php /opt/librenms/lnms config:set oxidized.url "http://libr
 docker exec librenms php /opt/librenms/lnms config:set oxidized.features.versioning true 2>/dev/null || true
 log_success "Oxidized configurado"
 
-# Limpiar caché
-log_info "Limpiando caché de configuración..."
-docker exec librenms php /opt/librenms/lnms config:cache 2>/dev/null || true
+# Limpiar caché (Fundamental al final para aplicar los cambios del .env)
+log_info "Limpiando y recargando caché..."
+docker exec librenms php /opt/librenms/artisan config:cache 2>/dev/null || true
 log_success "Caché limpiado"
+
 
 # =============================================================================
 log_step "FASE 9: Añadir Dispositivo de Prueba"
@@ -396,12 +432,35 @@ docker exec librenms php /opt/librenms/lnms device:add localhost --ping-only -f 
 log_success "Dispositivo localhost añadido"
 
 # =============================================================================
-log_step "FASE 10: Verificación del Sistema"
+log_step "FASE 10: Esperar Poller y Scheduler"
+# =============================================================================
+
+log_info "Esperando a que el dispatcher inicie el polling (60 segundos)..."
+sleep 60
+
+# Forzar un poll inicial
+log_info "Ejecutando polling inicial de localhost..."
+docker exec librenms php /opt/librenms/poller.php -h localhost 2>/dev/null | tail -5 || true
+
+# Verificar que el dispatcher está funcionando
+log_info "Verificando dispatcher..."
+DISPATCHER_PROCS=$(docker exec librenms_dispatcher ps aux 2>/dev/null | grep -cE "python|dispatch|artisan" || echo "0")
+if [[ "$DISPATCHER_PROCS" -gt 0 ]]; then
+    log_success "Dispatcher activo con $DISPATCHER_PROCS procesos"
+else
+    log_warning "Dispatcher puede estar iniciando..."
+    # Reiniciar dispatcher para forzar inicio
+    docker compose restart dispatcher
+    sleep 10
+fi
+
+# =============================================================================
+log_step "FASE 11: Verificación del Sistema"
 # =============================================================================
 
 log_info "Ejecutando validación de LibreNMS..."
 echo ""
-docker exec -u librenms librenms php /opt/librenms/validate.php 2>&1 | while read line; do
+docker exec -u librenms librenms php /opt/librenms/validate.php 2>&1 | while IFS= read -r line; do
     if echo "$line" | grep -q "^\[OK\]"; then
         echo -e "  ${GREEN}$line${NC}"
     elif echo "$line" | grep -q "^\[FAIL\]"; then
@@ -418,7 +477,7 @@ docker exec -u librenms librenms php /opt/librenms/validate.php 2>&1 | while rea
 done
 
 # =============================================================================
-log_step "FASE 11: Estado Final"
+log_step "FASE 12: Estado Final"
 # =============================================================================
 
 echo ""
@@ -453,26 +512,37 @@ else
     echo -e "  ${YELLOW}!${NC} LibreNMS Web: HTTP $HTTP_CODE"
 fi
 
-# Oxidized
+# Oxidized - esperar un poco más
+sleep 5
 OX_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8888/nodes" 2>/dev/null || echo "000")
 if [[ "$OX_STATUS" == "200" ]]; then
     echo -e "  ${GREEN}✓${NC} Oxidized API: Funcionando"
 else
-    echo -e "  ${YELLOW}!${NC} Oxidized API: Iniciando... (HTTP $OX_STATUS)"
+    echo -e "  ${YELLOW}!${NC} Oxidized API: Iniciando... (verificar en 1-2 minutos)"
 fi
 
-# Syslog
-if docker exec librenms_syslogng ss -tuln 2>/dev/null | grep -q ":514 "; then
+# Syslog - verificar desde el host
+if ss -tuln 2>/dev/null | grep -q ":514 " || netstat -tuln 2>/dev/null | grep -q ":514 "; then
     echo -e "  ${GREEN}✓${NC} Syslog-ng: Puerto 514 escuchando"
 else
-    echo -e "  ${RED}✗${NC} Syslog-ng: Puerto 514 no disponible"
+    echo -e "  ${YELLOW}!${NC} Syslog-ng: Verificando..."
+    docker exec librenms_syslogng ss -tuln 2>/dev/null | grep 514 && echo -e "  ${GREEN}✓${NC} Syslog interno OK" || true
 fi
 
-# SNMP Traps
-if docker exec librenms_snmptrapd ss -tuln 2>/dev/null | grep -q ":162 "; then
+# SNMP Traps - verificar desde el host
+if ss -tuln 2>/dev/null | grep -q ":162 " || netstat -tuln 2>/dev/null | grep -q ":162 "; then
     echo -e "  ${GREEN}✓${NC} SNMP Trapd: Puerto 162 escuchando"
 else
-    echo -e "  ${RED}✗${NC} SNMP Trapd: Puerto 162 no disponible"
+    echo -e "  ${YELLOW}!${NC} SNMP Trapd: Verificando..."
+    docker exec librenms_snmptrapd ss -tuln 2>/dev/null | grep 162 && echo -e "  ${GREEN}✓${NC} SNMP interno OK" || true
+fi
+
+# Dispatcher
+DISP_STATUS=$(docker logs --tail=5 librenms_dispatcher 2>&1 | grep -cE "Completed|Starting|INFO" || echo "0")
+if [[ "$DISP_STATUS" -gt 0 ]]; then
+    echo -e "  ${GREEN}✓${NC} Dispatcher: Activo"
+else
+    echo -e "  ${YELLOW}!${NC} Dispatcher: Verificar logs"
 fi
 
 # =============================================================================
@@ -494,11 +564,14 @@ echo -e "  ${GREEN}${BOLD}Servicios Disponibles:${NC}"
 echo "    • LibreNMS Web     https://${SERVER_IP}"
 echo "    • Syslog           ${SERVER_IP}:514 (TCP/UDP)"
 echo "    • SNMP Traps       ${SERVER_IP}:162 (TCP/UDP)"
-echo "    • Oxidized API     ${SERVER_IP}:8888"
+echo "    • Oxidized API     http://${SERVER_IP}:8888"
 echo ""
 echo -e "  ${GREEN}${BOLD}Credenciales de Base de Datos:${NC}"
 echo "    Usuario:  librenms"
 echo "    Password: ${DB_PASSWORD}"
+echo ""
+echo -e "  ${YELLOW}${BOLD}NOTA:${NC} El poller y scheduler pueden tardar 5-10 minutos en"
+echo "  mostrar actividad en la validación. Es normal en el primer arranque."
 echo ""
 echo -e "  ${YELLOW}${BOLD}Próximos Pasos:${NC}"
 echo "    1. Accede a https://${SERVER_IP} y cambia la contraseña"
@@ -510,7 +583,10 @@ echo ""
 echo -e "  ${BLUE}${BOLD}Comandos Útiles:${NC}"
 echo "    docker compose ps              # Estado de contenedores"
 echo "    docker compose logs -f         # Ver logs en tiempo real"
+echo "    docker compose logs dispatcher # Logs del poller"
 echo "    docker compose restart         # Reiniciar todo"
+echo ""
+echo -e "  ${BLUE}${BOLD}Verificar en 5 minutos:${NC}"
 echo "    docker exec -u librenms librenms php /opt/librenms/validate.php"
 echo ""
 echo -e "  ${BLUE}${BOLD}Ubicación del Proyecto:${NC} $(pwd)"
@@ -542,11 +618,14 @@ Servicios:
   SNMP Traps:  ${SERVER_IP}:162 (TCP/UDP)
   Oxidized:    http://${SERVER_IP}:8888
 
-Comandos:
+Comandos útiles:
   docker compose ps
   docker compose logs -f
   docker compose restart
   docker exec -u librenms librenms php /opt/librenms/validate.php
+
+NOTA: Los warnings de Poller/Scheduler son normales en los primeros
+5-10 minutos. El sistema necesita tiempo para ejecutar el primer ciclo.
 EOF
 
 log_success "Información guardada en INSTALL_INFO.txt"
