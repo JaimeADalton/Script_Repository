@@ -21,9 +21,6 @@
 name: noc-isp
 
 services:
-  # ===========================================================================
-  # DATABASE - MariaDB
-  # ===========================================================================
   db:
     image: mariadb:10.11
     container_name: librenms_db
@@ -40,6 +37,7 @@ services:
       - "--innodb-log-file-size=128M"
       - "--max-connections=300"
       - "--skip-name-resolve"
+      - "--bind-address=0.0.0.0"
     volumes:
       - "./data/db:/var/lib/mysql"
     environment:
@@ -54,6 +52,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+    ports:
+      - "127.0.0.1:3306:3306"
     networks:
       - noc-internal
     logging:
@@ -62,9 +62,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ===========================================================================
-  # CACHE - Redis
-  # ===========================================================================
   redis:
     image: redis:7.2-alpine
     container_name: librenms_redis
@@ -75,8 +72,7 @@ services:
       --appendonly yes
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
-      --save 60 1000
-      --save 300 100
+      --bind 0.0.0.0
     volumes:
       - "./data/redis:/data"
     environment:
@@ -87,6 +83,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    ports:
+      - "127.0.0.1:6379:6379"
     networks:
       - noc-internal
     logging:
@@ -95,9 +93,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ===========================================================================
-  # APPLICATION - LibreNMS (Web + Core)
-  # ===========================================================================
   librenms:
     image: librenms/librenms:24.11.0
     container_name: librenms
@@ -138,9 +133,6 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # ===========================================================================
-  # POLLER - Dispatcher (Sidecar)
-  # ===========================================================================
   dispatcher:
     image: librenms/librenms:24.11.0
     container_name: librenms_dispatcher
@@ -175,13 +167,6 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # ===========================================================================
-  # SYSLOG - Syslog-ng (network_mode: host para preservar IP origen)
-  # ===========================================================================
-  # IMPORTANTE: Usamos network_mode: host para que syslog-ng vea las IPs
-  # reales de los dispositivos que envían logs, evitando el Source NAT
-  # de Docker que enmascara todas las IPs como 172.x.x.x
-  # ===========================================================================
   syslogng:
     image: librenms/librenms:24.11.0
     container_name: librenms_syslogng
@@ -209,21 +194,12 @@ services:
       - DB_TIMEOUT=60
       - REDIS_HOST=127.0.0.1
       - SIDECAR_SYSLOGNG=1
-    extra_hosts:
-      - "db:127.0.0.1"
-      - "redis:127.0.0.1"
     logging:
       driver: json-file
       options:
         max-size: "20m"
         max-file: "3"
 
-  # ===========================================================================
-  # SNMP TRAPS - SNMPTrapd (network_mode: host para preservar IP origen)
-  # ===========================================================================
-  # IMPORTANTE: Usamos network_mode: host para que snmptrapd vea las IPs
-  # reales de los dispositivos que envían traps SNMP
-  # ===========================================================================
   snmptrapd:
     image: librenms/librenms:24.11.0
     container_name: librenms_snmptrapd
@@ -251,18 +227,12 @@ services:
       - DB_TIMEOUT=60
       - REDIS_HOST=127.0.0.1
       - SIDECAR_SNMPTRAPD=1
-    extra_hosts:
-      - "db:127.0.0.1"
-      - "redis:127.0.0.1"
     logging:
       driver: json-file
       options:
         max-size: "20m"
         max-file: "3"
 
-  # ===========================================================================
-  # CONFIG BACKUP - Oxidized
-  # ===========================================================================
   oxidized:
     image: oxidized/oxidized:0.30.1
     container_name: librenms_oxidized
@@ -285,9 +255,6 @@ services:
         max-size: "20m"
         max-file: "3"
 
-  # ===========================================================================
-  # REVERSE PROXY - Nginx
-  # ===========================================================================
   nginx:
     image: nginx:1.27-alpine
     container_name: librenms_proxy
@@ -310,9 +277,6 @@ services:
         max-size: "20m"
         max-file: "3"
 
-# =============================================================================
-# NETWORKS
-# =============================================================================
 networks:
   noc-internal:
     driver: bridge
