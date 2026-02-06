@@ -1,0 +1,436 @@
+#!/bin/bash
+set -euo pipefail
+
+# --- Configuración y Funciones Internas (Sin cambios respecto a la versión anterior) ---
+readonly ZIP_PASSWORD="TRC2025*+"
+readonly TTL_SECONDS=600
+readonly BASE_PORT=20000
+readonly MAX_PORT=40000
+readonly LINK_LOG="/tmp/ssh_links.log"
+readonly SERVER_DIR="/tmp/ssh_servers"
+readonly DEBUG=${DIST_DEBUG:-0} # 0 por defecto, activado por gestionar_usuarios -vv
+
+DATA_ONLY_MODE=0
+if [[ "${1:-}" == "--data-only" ]]; then
+    DATA_ONLY_MODE=1
+    shift
+fi
+
+_dist_debug_msg() {
+    local message=$1
+    if [[ $DEBUG -eq 1 ]]; then
+        echo "[DIST-DEBUG] $message" >&2
+    fi
+}
+
+_dist_check_dependencies() {
+    local missing_deps=()
+    if ! command -v 7z &>/dev/null; then
+        if ! command -v zip &>/dev/null; then missing_deps+=("zip o p7zip"); fi
+    fi
+    if ! command -v python3 &>/dev/null; then missing_deps+=("python3"); fi
+    if ! command -v nohup &>/dev/null; then missing_deps+=("nohup"); fi
+
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        echo "ERROR (distribuir_claves): Faltan dependencias: ${missing_deps[*]}" >&2
+        echo "Instale los paquetes necesarios y vuelva a intentarlo." >&2
+        exit 1
+    fi
+    mkdir -p "$SERVER_DIR"
+}
+
+_dist_get_random_port() {
+    local port min_port max_port
+    min_port=$1
+    max_port=$2
+    for _ in {1..100}; do
+        port=$(shuf -i "$min_port-$max_port" -n 1)
+        # Mejorar chequeo: ss con -H omite cabecera, -l escucha, -t tcp, -n numérico, -p procesos
+        if ! ss -Hltnp "sport = :$port" | grep -q ":$port"; then
+            # Verificación adicional contra nuestros propios scripts python
+             if ! grep -q "PORT = $port" "${SERVER_DIR}"/*/server.py 2>/dev/null; then
+                 echo "$port"
+                 return 0
+             else
+                  _dist_debug_msg "Puerto $port encontrado por shuf, pero ya usado por otro server.py nuestro."
+             fi
+        fi
+    done
+    echo "ERROR (distribuir_claves): No se pudo encontrar un puerto libre." >&2
+    return 1
+}
+
+_dist_generate_token() {
+    python3 -c 'import secrets; print(secrets.token_urlsafe(16))'
+}
+
+# --- CORRECCIÓN: _dist_create_encrypted_zip con chequeo robusto ---
+_dist_create_encrypted_zip() {
+    local username=$1; local key_file=$2; local ppk_file=$3
+    local output_zip="${SERVER_DIR}/${username}_ssh_keys.zip"
+    local zip_cmd_status=1 # 1 = fallo por defecto
+
+    if [[ $DEBUG -eq 1 && $DATA_ONLY_MODE -eq 0 ]]; then
+        echo "Creando archivo ZIP cifrado para $username..." >&2
+    fi
+    _dist_debug_msg "Interno: Creando ZIP para $username en $output_zip"
+    rm -f "$output_zip" # Asegurar que no exista uno viejo
+
+    if command -v 7z &>/dev/null; then
+        _dist_debug_msg "Intentando crear ZIP con 7z..."
+        timeout 30s 7z a -tzip -mem=AES256 -p"$ZIP_PASSWORD" "$output_zip" "$key_file" "$ppk_file" >/dev/null 2>&1
+        zip_cmd_status=$?
+        if [[ $zip_cmd_status -ne 0 ]]; then
+            _dist_debug_msg "7z falló (status: $zip_cmd_status). Intentando con zip..."
+            # Continuar para intentar con zip
+        else
+             _dist_debug_msg "7z tuvo éxito."
+        fi
+    fi
+
+    # Si 7z no existe O falló, intentar con zip
+    if [[ ! -f "$output_zip" ]] && command -v zip &>/dev/null; then
+         _dist_debug_msg "Intentando crear ZIP con zip..."
+         timeout 30s zip -j -P "$ZIP_PASSWORD" "$output_zip" "$key_file" "$ppk_file" >/dev/null 2>&1
+         zip_cmd_status=$?
+         if [[ $zip_cmd_status -ne 0 ]]; then
+              _dist_debug_msg "zip falló (status: $zip_cmd_status)."
+         else
+              _dist_debug_msg "zip tuvo éxito."
+         fi
+    elif [[ ! -f "$output_zip" ]]; then # Ni 7z ni zip funcionaron o existen
+        if ! command -v 7z &>/dev/null && ! command -v zip &>/dev/null; then
+             echo "ERROR (distribuir_claves): Ni 7z ni zip están instalados." >&2
+        else
+             # 7z existía pero falló, y zip no existe o también falló si se intentó
+             echo "ERROR (distribuir_claves): Falló la creación del ZIP (7z status si se usó: $zip_cmd_status, zip no disponible o falló)." >&2
+        fi
+        return 1 # Falla definitiva
+    fi
+
+    # Verificación final: ¿El archivo existe y el último comando tuvo éxito?
+    # (Si 7z funcionó, zip_cmd_status es 0. Si zip funcionó, zip_cmd_status es 0)
+    if [[ $zip_cmd_status -eq 0 && -f "$output_zip" ]]; then
+        _dist_debug_msg "Archivo ZIP '$output_zip' creado exitosamente."
+        echo "$output_zip" # Retornar path
+        return 0
+    else
+        echo "ERROR (distribuir_claves): Verificación final falló para crear ZIP '$output_zip' (status: $zip_cmd_status, existe: $([[ -f "$output_zip" ]] && echo sí || echo no))." >&2
+        rm -f "$output_zip" # Limpiar archivo potencialmente corrupto
+        return 1
+    fi
+}
+# --- FIN CORRECCIÓN ---
+
+
+# --- Resto de funciones _dist_create_server_script, _dist_start_temporary_server, etc. (Sin cambios respecto a la versión anterior) ---
+_dist_create_server_script() {
+    local username=$1; local zip_file=$2; local port=$3; local token=$4; local ttl=$5
+    local server_sub_dir="${SERVER_DIR}/${username}_server"
+    local script_file="$server_sub_dir/server.py"
+    mkdir -p "$server_sub_dir"
+    cat > "$script_file" <<EOF
+#!/usr/bin/env python3
+import http.server, socketserver, threading, os, sys, urllib.parse, datetime, signal, time, socket, logging
+
+PORT = $port
+FILE = "$zip_file"
+TTL = $ttl
+TOKEN = "$token"
+SERVER_DIR = "$server_sub_dir"
+FILENAME = os.path.basename(FILE)
+PID_FILE = os.path.join(SERVER_DIR, "server.pid")
+URL_FILE = os.path.join(SERVER_DIR, "url.txt")
+LOG_FILE = os.path.join(SERVER_DIR, "server.log") # Log del server Python
+ALREADY_DOWNLOADED = False
+
+logging.basicConfig(filename=LOG_FILE, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+with open(PID_FILE, 'w') as f: f.write(str(os.getpid()))
+logging.info(f"Servidor Python iniciado. PID: {os.getpid()}, Puerto: {PORT}, Archivo: {FILE}")
+
+class TokenHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        global ALREADY_DOWNLOADED; path = self.path.strip('/')
+        logging.info(f"Solicitud GET: {path} desde {self.client_address[0]}")
+        if ALREADY_DOWNLOADED:
+            logging.warning(f"Intento de descarga post-uso: {path}"); self.send_error(410, "Gone"); return
+        if path == TOKEN:
+            logging.info(f"Token válido. Descarga iniciada para {FILENAME} desde {self.client_address[0]}")
+            if not os.path.exists(FILE):
+                logging.error(f"Archivo no encontrado en el servidor: {FILE}")
+                self.send_error(404, "File not found")
+                return # <<--- Asegurar que retorna aquí
+            self.send_response(200); self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Disposition', f'attachment; filename="{FILENAME}"'); self.send_header('Content-Length', str(os.path.getsize(FILE))); self.end_headers()
+            try:
+                with open(FILE, 'rb') as f: self.wfile.write(f.read())
+                logging.info(f"Descarga completada: {FILENAME}"); ALREADY_DOWNLOADED = True
+                logging.info("Marcado como usado. Apagado programado en 2s."); threading.Timer(2.0, shutdown_python_server).start()
+            except Exception as e: logging.error(f"Error enviando archivo: {e}")
+        else: logging.warning(f"Token inválido: {path}"); self.send_error(404, "Not Found")
+    def log_message(self, format, *args): logging.info(format%args)
+
+def get_python_server_ip():
+    try:
+        # Intenta obtener la IP de la interfaz por defecto o la primera IP no local
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.1) # Evita bloqueos largos
+        s.connect(("8.8.8.8", 80)) # Google DNS, no necesita ser alcanzable
+        ip = s.getsockname()[0]
+        s.close()
+        logging.info(f"IP obtenida por socket: {ip}")
+        return ip
+    except Exception as e_sock:
+        logging.warning(f"Socket a 8.8.8.8 falló: {e_sock}. Intentando hostname -I.")
+        try:
+            ip_list = os.popen("hostname -I").read().strip().split()
+            for ip_addr in ip_list:
+                 if ip_addr and ip_addr != "127.0.0.1" and not ip_addr.startswith("::"):
+                     logging.info(f"IP obtenida por hostname -I: {ip_addr}")
+                     return ip_addr
+            logging.warning("hostname -I no dio IPs válidas.")
+        except Exception as e_host:
+            logging.warning(f"hostname -I falló: {e_host}")
+    logging.warning("No se pudo obtener IP externa, usando localhost.")
+    return "localhost"
+
+
+httpd_instance = None
+def shutdown_python_server():
+    global httpd_instance; logging.info("Iniciando apagado del servidor Python...")
+    try:
+        if os.path.exists(FILE): os.remove(FILE); logging.info(f"Archivo ZIP eliminado: {FILE}")
+    except Exception as e: logging.error(f"Error eliminando ZIP: {e}")
+    try:
+        if os.path.exists(PID_FILE): os.remove(PID_FILE)
+    except Exception as e: logging.error(f"Error eliminando PID: {e}")
+    try:
+        with open(os.path.join(SERVER_DIR, "completed.txt"), "w") as f: f.write(f"Terminado: {datetime.datetime.now()}")
+    except Exception as e: logging.error(f"Error creando completed.txt: {e}")
+    if httpd_instance:
+        logging.info("Deteniendo instancia httpd..."); httpd_instance.shutdown()
+    logging.info("Apagado del servidor Python finalizado. Saliendo.")
+    # Usar os._exit para asegurar que nohup termine si sys.exit no funciona
+    os._exit(0)
+
+def signal_handler_python(sig, frame): logging.info(f"Señal {sig} recibida."); shutdown_python_server()
+signal.signal(signal.SIGTERM, signal_handler_python); signal.signal(signal.SIGINT, signal_handler_python)
+
+class ThreadedHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer): allow_reuse_address = True; daemon_threads = True
+
+try:
+    test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM); test_socket.bind(('0.0.0.0', PORT)); test_socket.close()
+    logging.info(f"Puerto {PORT} disponible.")
+except Exception as e: logging.error(f"Puerto {PORT} no disponible: {e}"); sys.exit(1)
+
+try:
+    httpd_instance = ThreadedHTTPServer(("0.0.0.0", PORT), TokenHTTPRequestHandler)
+    ip = get_python_server_ip(); url = f"http://{ip}:{PORT}/{TOKEN}"
+    logging.info(f"URL para servir: {url}")
+    with open(URL_FILE, "w") as f: f.write(url)
+    timer = threading.Timer(TTL, shutdown_python_server); timer.daemon = True; timer.start()
+    logging.info(f"Servidor Python escuchando en {ip}:{PORT}..."); httpd_instance.serve_forever()
+except Exception as e: logging.error(f"Error principal del servidor Python: {e}"); sys.exit(1)
+finally:
+    logging.info("Bloque finally del servidor Python alcanzado.")
+    if 'timer' in locals() and timer.is_alive(): timer.cancel()
+
+EOF
+    chmod +x "$script_file"
+    echo "$script_file"
+}
+
+_dist_start_temporary_server() {
+    local username=$1; local zip_file=$2; local port=$3; local token=$4; local ttl=$5
+    local server_sub_dir="${SERVER_DIR}/${username}_server"
+
+    if [[ -d "$server_sub_dir" ]]; then
+        _dist_debug_msg "Eliminando servidor anterior en $server_sub_dir"
+        if [[ -f "$server_sub_dir/server.pid" ]]; then
+            local old_pid; old_pid=$(cat "$server_sub_dir/server.pid")
+            if kill -0 "$old_pid" 2>/dev/null; then
+                _dist_debug_msg "Terminando proceso anterior (PID: $old_pid)"
+                kill "$old_pid" 2>/dev/null || true; sleep 0.5
+            fi
+        fi
+        # Ser más agresivo con la limpieza si el directorio existe
+        _dist_debug_msg "Limpiando directorio $server_sub_dir..."
+        rm -rf "$server_sub_dir"
+    fi
+    # Crear directorio aquí asegura permisos correctos si rm -rf lo eliminó
+    mkdir -p "$server_sub_dir"
+
+    _dist_debug_msg "Creando script de servidor Python para $username"
+    local script_file_path
+    script_file_path=$(_dist_create_server_script "$username" "$zip_file" "$port" "$token" "$ttl")
+    if [[ -z "$script_file_path" ]]; then
+         echo "ERROR (distribuir_claves): No se pudo crear el script del servidor." >&2
+         return 1
+    fi
+
+    _dist_debug_msg "Iniciando servidor Python para $username en puerto $port vía nohup ($script_file_path)"
+    # Ejecutar nohup en un subshell para aislarlo y redirigir correctamente
+    ( nohup python3 "$script_file_path" > "$server_sub_dir/nohup.out" 2>&1 & )
+
+    local url_file_path="$server_sub_dir/url.txt"
+    local wait_timeout=20
+    _dist_debug_msg "Esperando a que $url_file_path se genere (hasta ${wait_timeout}s)..."
+
+    SECONDS=0
+    while [[ ! -f "$url_file_path" && $SECONDS -lt $wait_timeout ]]; do
+        sleep 0.5
+        # Añadir un chequeo para ver si el proceso python sigue vivo
+        if ! pgrep -f "$script_file_path" > /dev/null; then
+             _dist_debug_msg "Proceso del servidor Python parece haber terminado prematuramente."
+             break # Salir del bucle while
+        fi
+    done
+
+    if [[ -f "$url_file_path" ]]; then
+        cat "$url_file_path"
+    else
+        echo "ERROR (distribuir_claves): No se pudo iniciar/obtener URL del servidor Python para $username." >&2
+        echo "  Verifique los logs en: $server_sub_dir/server.log y $server_sub_dir/nohup.out" >&2
+        # Podríamos intentar leer las últimas líneas del log aquí
+        if [[ -f "$server_sub_dir/server.log" ]]; then
+            echo "  Últimas líneas de server.log:" >&2
+            tail -n 5 "$server_sub_dir/server.log" >&2
+        fi
+         if [[ -f "$server_sub_dir/nohup.out" ]]; then
+            echo "  Últimas líneas de nohup.out:" >&2
+            tail -n 5 "$server_sub_dir/nohup.out" >&2
+        fi
+        return 1
+    fi
+}
+
+_dist_distribute_ssh_keys() {
+    local username=$1; local key_file=$2; local ppk_file=$3
+
+    _dist_debug_msg "Iniciando distribución para $username..."
+    if [[ ! -f "$key_file" ]]; then echo "ERROR (distribuir_claves): $key_file no encontrado." >&2; return 1; fi
+    if [[ ! -f "$ppk_file" ]]; then echo "ERROR (distribuir_claves): $ppk_file no encontrado." >&2; return 1; fi
+
+    _dist_debug_msg "Creando ZIP para $username..."
+    local zip_path;
+    zip_path=$(_dist_create_encrypted_zip "$username" "$key_file" "$ppk_file")
+    if [[ $? -ne 0 || -z "$zip_path" ]]; then
+        echo "ERROR (distribuir_claves): Fallo al crear ZIP para $username. Abortando distribución." >&2; return 1
+    fi
+    _dist_debug_msg "ZIP creado en: $zip_path"
+
+    local token; token=$(_dist_generate_token)
+    local port; port=$(_dist_get_random_port "$BASE_PORT" "$MAX_PORT")
+    if [[ -z "$port" ]]; then
+        echo "ERROR (distribuir_claves): No se pudo obtener puerto. Abortando." >&2
+        rm -f "$zip_path" # Limpiar zip si no podemos iniciar servidor
+        return 1;
+    fi
+    _dist_debug_msg "Puerto aleatorio obtenido: $port"
+
+    _dist_debug_msg "Iniciando servidor temporal para $username en puerto $port..."
+    local url;
+    url=$(_dist_start_temporary_server "$username" "$zip_path" "$port" "$token" "$TTL_SECONDS")
+    if [[ -z "$url" ]]; then
+        echo "ERROR (distribuir_claves): No se pudo generar enlace/iniciar servidor para $username." >&2
+        # zip_path debería ser limpiado por el servidor python si arrancó y falló,
+        # o por la función shutdown si recibió señal. Si _dist_start_temporary_server falló antes
+        # de arrancar nohup, el zip sigue ahí.
+        # rm -f "$zip_path" # Podríamos añadir limpieza aquí por si acaso.
+        return 1
+    fi
+    _dist_debug_msg "URL obtenida: $url"
+
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Usuario: $username, URL: $url, Contraseña ZIP: $ZIP_PASSWORD" >> "$LINK_LOG"
+
+    if [[ $DATA_ONLY_MODE -eq 1 ]]; then
+        echo "USER:${username};URL:${url};PASSWORD:${ZIP_PASSWORD}"
+    else
+        echo "==========================================================="
+        echo "Enlace para $username (disponible para una única descarga):"
+        echo "$url"
+        echo "Contraseña del ZIP: $ZIP_PASSWORD"
+        echo "==========================================================="
+    fi
+    return 0 # Éxito en esta función
+}
+
+_dist_cleanup_old_servers() {
+    _dist_debug_msg "Buscando servidores antiguos en $SERVER_DIR..."
+    local server_dirs_found=0
+    # Usar find es más seguro que el globbing si hay muchos archivos/directorios
+    find "$SERVER_DIR" -maxdepth 1 -mindepth 1 -name '*_server' -type d -print -quit | grep -q . && server_dirs_found=1
+
+    if [[ $server_dirs_found -eq 0 ]]; then
+        _dist_debug_msg "No se encontraron directorios de servidor antiguos."
+        return
+    fi
+
+    find "$SERVER_DIR" -maxdepth 1 -mindepth 1 -name '*_server' -type d -print0 | while IFS= read -r -d $'\0' server_path; do
+        _dist_debug_msg "Evaluando directorio: $server_path"
+        local pid_file="$server_path/server.pid"
+        local completed_file="$server_path/completed.txt"
+        local pid=""
+        [[ -f "$pid_file" ]] && pid=$(cat "$pid_file")
+
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            # Proceso activo
+             if [[ -f "$completed_file" ]]; then
+                 _dist_debug_msg "Servidor $server_path (PID $pid) completado pero proceso aún activo? Limpiando."
+                 kill "$pid" 2>/dev/null || true; rm -rf "$server_path"
+             else
+                 # Calcular antigüedad del directorio como fallback
+                 local current_time age
+                 current_time=$(date +%s)
+                 # Usar %Y para Linux (tiempo de cambio de status), %m para macOS (tiempo de modif.)
+                 local creation_time_stat
+                 if [[ $(uname) == "Darwin" ]]; then
+                     creation_time_stat=$(stat -f %m "$server_path")
+                 else
+                     creation_time_stat=$(stat -c %Y "$server_path")
+                 fi
+                 age=$((current_time - creation_time_stat))
+
+                 if [[ $age -gt $((2 * TTL_SECONDS)) ]]; then
+                     _dist_debug_msg "Servidor $server_path (PID $pid) parece colgado (edad: ${age}s > 2*TTL). Forzando limpieza."
+                     kill -9 "$pid" 2>/dev/null || true
+                     rm -rf "$server_path"
+                 else
+                     _dist_debug_msg "Servidor $server_path (PID $pid) activo. Dejando que se autogestione."
+                 fi
+             fi
+        else
+            # Proceso no activo (o no hay PID)
+            _dist_debug_msg "Servidor $server_path sin proceso activo (PID: $pid). Limpiando."
+            rm -rf "$server_path"
+        fi
+    done
+}
+
+
+_dist_main() {
+    if [[ $# -lt 3 ]]; then
+        echo "Uso interno (distribuir_claves): <usuario> <archivo_clave> <archivo_ppk>" >&2
+        exit 1
+    fi
+    local username=$1; local key_file=$2; local ppk_file=$3
+
+    _dist_debug_msg "Ejecutando _dist_main para $username"
+    if [[ ! -f "$key_file" ]]; then echo "ERROR (distribuir_claves): Archivo clave $key_file no existe." >&2; exit 1; fi
+    if [[ ! -f "$ppk_file" ]]; then echo "ERROR (distribuir_claves): Archivo PPK $ppk_file no existe." >&2; exit 1; fi
+
+    _dist_check_dependencies
+    _dist_cleanup_old_servers
+    # Llamar a la función principal de distribución y capturar su código de salida
+    if _dist_distribute_ssh_keys "$username" "$key_file" "$ppk_file"; then
+        _dist_debug_msg "_dist_distribute_ssh_keys tuvo éxito para $username."
+        return 0
+    else
+        _dist_debug_msg "_dist_distribute_ssh_keys falló para $username."
+        return 1 # Propagar el fallo
+    fi
+}
+
+# Ejecutar main y salir con su código de estado
+_dist_main "$@"
+exit $?
